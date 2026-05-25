@@ -1,0 +1,41 @@
+<launch>
+    <param name="/use_sim_time" value="true" />
+
+    <arg name="rviz" default="true" />
+    <arg name="namespace" default="vehicle0" />
+    <arg name="robot_id" default="0" />
+    <arg name="sensor_name" default="velodyne" />
+    <arg name="config" default="$(find fast_lio)/config/velodyne16_simulation_robot1.yaml" />
+
+    <arg name="feature_extract_enable" default="false" />
+    <arg name="point_filter_num" default="1" />
+    <arg name="max_iteration" default="5" />
+    <arg name="filter_size_surf" default="0.5" />
+    <arg name="filter_size_map" default="0.5" />
+    <arg name="cube_side_length" default="1000" />
+    <arg name="runtime_pos_log_enable" default="false" />
+    <arg name="dis_th" default="1.5" />
+
+    <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping_client$(arg robot_id)" output="screen">
+        <rosparam command="load" file="$(arg config)" />
+        <param name="NameSpace" type="string" value="$(arg namespace)" />
+        <param name="feature_extract_enable" type="bool" value="$(arg feature_extract_enable)" />
+        <param name="point_filter_num" type="int" value="$(arg point_filter_num)" />
+        <param name="max_iteration" type="int" value="$(arg max_iteration)" />
+        <param name="filter_size_surf" type="double" value="$(arg filter_size_surf)" />
+        <param name="filter_size_map" type="double" value="$(arg filter_size_map)" />
+        <param name="cube_side_length" type="double" value="$(arg cube_side_length)" />
+        <param name="runtime_pos_log_enable" type="bool" value="$(arg runtime_pos_log_enable)" />
+    </node>
+
+    <node pkg="fast_lio" type="my_node" name="LIO_Publisher_client$(arg robot_id)" output="screen">
+        <param name="RobotID" type="int" value="$(arg robot_id)" />
+        <param name="NameSpace" type="string" value="$(arg namespace)" />
+        <param name="SensorName" type="string" value="$(arg sensor_name)" />
+        <param name="dis_th" type="double" value="$(arg dis_th)" />
+    </node>
+
+    <group if="$(arg rviz)">
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz_$(arg namespace)" args="-d $(find fast_lio)/rviz_cfg/loam_livox_vehicle0.rviz" />
+    </group>
+</launch>

@@ -1,0 +1,11 @@
+<launch>
+    <arg name="rviz" default="false" />
+
+    <include file="$(find fast_lio)/launch/simulation_rs16.launch">
+        <arg name="rviz" value="$(arg rviz)" />
+        <arg name="namespace" value="vehicle1" />
+        <arg name="robot_id" value="1" />
+        <arg name="sensor_name" value="velodyne" />
+        <arg name="config" value="$(find fast_lio)/config/velodyne16_simulation_robot2.yaml" />
+    </include>
+</launch>

@@ -1,0 +1,28 @@
+<launch>
+
+  <!-- robot_1 -->
+  <node pkg="fast_lio" type="submap_to_newsubmap_node.py" name="submap_convert_robot_1" output="screen">
+    <param name="robot_id" value="1"/>
+    <param name="in_topic" value="/robot_1/submap"/>
+    <param name="out_topic" value="/robot_4/new_submap"/>
+    <param name="start_id" value="0"/>
+  </node>
+
+  <!-- robot_2 -->
+  <node pkg="fast_lio" type="submap_to_newsubmap_node.py" name="submap_convert_robot_2" output="screen">
+    <param name="robot_id" value="2"/>
+    <param name="in_topic" value="/robot_2/submap"/>
+    <param name="out_topic" value="/robot_5/new_submap"/>
+    <param name="start_id" value="0"/>
+  </node>
+
+  <!-- robot_3 -->
+  <node pkg="fast_lio" type="submap_to_newsubmap_node.py" name="submap_convert_robot_3" output="screen">
+    <param name="robot_id" value="3"/>
+    <param name="in_topic" value="/robot_3/submap"/>
+    <param name="out_topic" value="/robot_6/new_submap"/>
+    <param name="start_id" value="0"/>
+  </node>
+
+</launch>
+

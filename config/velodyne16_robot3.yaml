@@ -1,0 +1,73 @@
+common:
+    lid_topic:  "/robot_3/pointcloud"
+    imu_topic:  "/robot_3/imu_data"
+    time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
+    
+preprocess:
+    lidar_type: 2                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
+    scan_line: 16
+    blind: 1
+
+mapping:
+    # acc_cov: 0.1
+    # gyr_cov: 0.1
+    # b_acc_cov: 0.009
+    # b_gyr_cov: 0.002
+
+    # S3E
+    acc_cov: 0.012
+    gyr_cov: 0.011
+    b_acc_cov: 0.000005
+    b_gyr_cov: 0.0000007
+    fov_degree:    180
+    det_range:     100.0
+    # extrinsic_est_en:  true      # true: enable the online estimation of IMU-LiDAR extrinsic
+    # extrinsic_T: [ 0.144414, -0.012514, 0.248438]
+    # extrinsic_R:  [0.016500, -0.999854,  0.004485,
+    #                0.999863,  0.016496, -0.001016,
+    #                0.000942,  0.004501,  0.999989]
+    # extrinsic_T: [ -0.282939, -0.001629, 0.304245]  #init之后的结果
+    # extrinsic_R:  [-0.030013, -0.997973,  -0.056115,
+    #                0.999471,  -0.030668, 0.010862,
+    #                -0.012561,  -0.055759,  0.998365]
+    # extrinsic_est_en:  true      # true: enable the online estimation of IMU-LiDAR extrinsic
+    # extrinsic_T: [ 0.0, 0.0, 0.0 ]
+    # extrinsic_R: [1, 0, 0,
+    #               0, 1, 0,
+    #               0, 0, 1]
+    
+    
+    # # BIT 
+    # extrinsic_est_en:  true  
+    # extrinsic_T: [0.0, 0.0, 0.0]
+    # extrinsic_R: [0.356622, -0.934207,  0.00882189,
+    #               0.933948,  0.356251, -0.0287459,
+    #               0.0237118, 0.0184906, 0.999548]
+
+    # S3E
+    # extrinsic_est_en:  true 
+    # extrinsic_T: [0.0077843719065185946, -0.20402449606108217, -0.02904541171916744]
+    # extrinsic_R: [0.9995552714774709, -0.022144088840141164, 0.01997228401350044, 0.021811658159078137, 0.999622421673815, 0.016711502850279048, -0.020334812152697626, -0.01626844057302703, 0.999660862885093]
+
+    # S3E alpha
+    extrinsic_est_en:  true
+    extrinsic_T: [-0.04299245867653856, 0.14554516526889977, -0.010622113127460864]
+    extrinsic_R: [0.999457092910122, 0.03158874155644932, -0.009363056101964334, -0.03158157801651295, 0.9995007658530138, 0.0009115931250496357, 0.009387179146324627, -0.0006154009751695233, 0.9999557540296615]
+
+
+    # extrinsic_est_en:  false      # true: enable the online estimation of IMU-LiDAR extrinsic
+    # extrinsic_T: [ 0.029058, 0.049253, -0.072900]
+    # extrinsic_R:  [-0.009548, -0.999949, 0.003253,
+    #                 0.999950, -0.009558, -0.003085,
+    #                 0.003116, 0.003223, 0.999990]
+
+publish:
+    path_en:  false
+    scan_publish_en:  true       # false: close all the point cloud output
+    dense_publish_en: false       # false: low down the points number in a global-frame point clouds scan.
+    scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame
+
+pcd_save:
+    pcd_save_en: false
+    interval: -1                 # how many LiDAR frames saved in each pcd file; 
+                                 # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
