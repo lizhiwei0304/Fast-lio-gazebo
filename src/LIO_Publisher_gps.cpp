@@ -213,8 +213,7 @@ void LIO_Pub::OdomCallback(const nav_msgs::Odometry::ConstPtr &gps_msg, const na
     // 发布子图
     dislam_msgs::SubMap submapMsg;
     submapMsg.keyframePC = output;
-    submapMsg.pose.position = odom_msg_copy.pose.pose.position;       // 使用副本的位姿
-    submapMsg.pose.orientation = odom_msg_copy.pose.pose.orientation; // 使用副本的四元数
+    submapMsg.pose = odom_msg_copy.pose;
     subMapPublisher_.publish(submapMsg);
     pointCloudPublisher_.publish(output);
     registeredCloud.reset(new pcl::PointCloud<pcl::PointXYZI>);

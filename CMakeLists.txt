@@ -52,6 +52,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   pcl_ros
   tf
+  dislam_msgs
   livox_ros_driver
   message_generation
   eigen_conversions
@@ -82,7 +83,7 @@ generate_messages(
 )
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs message_runtime
+  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs dislam_msgs message_runtime
   DEPENDS EIGEN3 PCL
   INCLUDE_DIRS
 )
@@ -92,13 +93,16 @@ target_link_libraries(fastlio_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYT
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 add_executable(my_node src/LIO_Publisher.cpp)
+add_dependencies(my_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(my_node ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(my_node PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 add_executable(my_node_z src/LIO_Publisher_z.cpp)
+add_dependencies(my_node_z ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(my_node_z ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(my_node_z PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 add_executable(my_node_gps src/LIO_Publisher_gps.cpp)
+add_dependencies(my_node_gps ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(my_node_gps ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(my_node_gps PRIVATE ${PYTHON_INCLUDE_DIRS})

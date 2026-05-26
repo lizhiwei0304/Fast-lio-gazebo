@@ -206,33 +206,20 @@ void LIO_Pub::OdomCallback(nav_msgs::Odometry msg)
     // output.orthoImage = *orthoImage;
     output.header.stamp = msg.header.stamp;
     submapMsg.keyframePC = output;
-    submapMsg.pose.position.x = msg.pose.pose.position.x;
-    submapMsg.pose.position.y = msg.pose.pose.position.y;
-    submapMsg.pose.position.z = msg.pose.pose.position.z;
+    submapMsg.pose = msg.pose;
     if (UseGPSAltitute)
     {
-      submapMsg.pose.position.z = altitude - gpsAltitude;
+      submapMsg.pose.pose.position.z = altitude - gpsAltitude;
       std::cout << "altitude = " << altitude << std::endl;
       std::cout << "gpsAltitude = " << gpsAltitude << std::endl;
     }
-
-    submapMsg.pose.orientation.x = msg.pose.pose.orientation.x;
-    submapMsg.pose.orientation.y = msg.pose.pose.orientation.y;
-    submapMsg.pose.orientation.z = msg.pose.pose.orientation.z;
-    submapMsg.pose.orientation.w = msg.pose.pose.orientation.w;
 
     nav_msgs::Odometry modified_odom;
 
     modified_odom.header.stamp = msg.header.stamp;
     // modified_odom.header.stamp = ros::Time::now();
     modified_odom.header.frame_id = "lio_odomtry";
-    modified_odom.pose.pose.position.x = submapMsg.pose.position.x;
-    modified_odom.pose.pose.position.y = submapMsg.pose.position.y;
-    modified_odom.pose.pose.position.z = submapMsg.pose.position.z;
-    modified_odom.pose.pose.orientation.x = submapMsg.pose.orientation.x;
-    modified_odom.pose.pose.orientation.y = submapMsg.pose.orientation.y;
-    modified_odom.pose.pose.orientation.z = submapMsg.pose.orientation.z;
-    modified_odom.pose.pose.orientation.w = submapMsg.pose.orientation.w;
+    modified_odom.pose = submapMsg.pose;
 
     modifyOdomPublisher_.publish(modified_odom);
 

@@ -179,13 +179,7 @@ void LIO_Pub::OdomCallback(nav_msgs::Odometry msg)
     // output.submap = pc;
     // output.orthoImage = *orthoImage;
     submapMsg.keyframePC = output;
-    submapMsg.pose.position.x = msg.pose.pose.position.x;
-    submapMsg.pose.position.y = msg.pose.pose.position.y;
-    submapMsg.pose.position.z = msg.pose.pose.position.z;
-    submapMsg.pose.orientation.x = msg.pose.pose.orientation.x;
-    submapMsg.pose.orientation.y = msg.pose.pose.orientation.y;
-    submapMsg.pose.orientation.z = msg.pose.pose.orientation.z;
-    submapMsg.pose.orientation.w = msg.pose.pose.orientation.w;
+    submapMsg.pose = msg.pose;
     subMapPublisher_.publish(submapMsg);
     pointCloudPublisher_.publish(output);
     registeredCloud.reset(new pcl::PointCloud<pcl::PointXYZI>);
