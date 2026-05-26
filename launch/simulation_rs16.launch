@@ -6,6 +6,7 @@
     <arg name="robot_id" default="0" />
     <arg name="sensor_name" default="velodyne" />
     <arg name="config" default="$(find fast_lio)/config/velodyne16_simulation_robot1.yaml" />
+    <arg name="loop_candidate_selector" default="true" />
 
     <arg name="feature_extract_enable" default="false" />
     <arg name="point_filter_num" default="1" />
@@ -34,6 +35,11 @@
         <param name="SensorName" type="string" value="$(arg sensor_name)" />
         <param name="dis_th" type="double" value="$(arg dis_th)" />
     </node>
+
+    <include if="$(arg loop_candidate_selector)" file="$(find fast_lio)/launch/loop_candidate_selector.launch">
+        <arg name="robot_namespace" value="$(arg namespace)" />
+        <arg name="robot_id" value="$(arg robot_id)" />
+    </include>
 
     <group if="$(arg rviz)">
         <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz_$(arg namespace)" args="-d $(find fast_lio)/rviz_cfg/loam_livox_vehicle0.rviz" />

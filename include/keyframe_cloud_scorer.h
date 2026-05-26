@@ -86,11 +86,8 @@ public:
     bool is_candidate = false;
   };
 
-  explicit KeyframeCloudScorer(const Params& params = Params())
-      : params_(params)
-  {
-    normalizeWeights();
-  }
+  KeyframeCloudScorer();
+  explicit KeyframeCloudScorer(const Params& params);
 
   Score evaluateOne(const std::vector<KeyFrame>& keyframes, int target_idx) const
   {
@@ -572,3 +569,14 @@ private:
 private:
   Params params_;
 };
+
+inline KeyframeCloudScorer::KeyframeCloudScorer()
+    : KeyframeCloudScorer(Params())
+{
+}
+
+inline KeyframeCloudScorer::KeyframeCloudScorer(const Params& params)
+    : params_(params)
+{
+  normalizeWeights();
+}
