@@ -13,8 +13,8 @@ preprocess:
 mapping:
     acc_cov: 0.1
     gyr_cov: 0.1
-    b_acc_cov: 0.0001
-    b_gyr_cov: 0.0001
+    b_acc_cov: 0.0
+    b_gyr_cov: 0.0
     fov_degree: 360
     det_range: 100.0
 
