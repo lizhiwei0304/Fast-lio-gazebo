@@ -106,3 +106,7 @@ add_executable(my_node_gps src/LIO_Publisher_gps.cpp)
 add_dependencies(my_node_gps ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(my_node_gps ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(my_node_gps PRIVATE ${PYTHON_INCLUDE_DIRS})
+
+add_executable(loop_candidate_selector_node src/loop_candidate_selector_node.cpp)
+add_dependencies(loop_candidate_selector_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+target_link_libraries(loop_candidate_selector_node ${catkin_LIBRARIES} ${PCL_LIBRARIES})

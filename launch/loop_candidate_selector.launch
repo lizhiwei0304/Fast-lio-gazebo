@@ -1,0 +1,40 @@
+<launch>
+  <arg name="robot_id" default="1"/>
+  <arg name="submap_topic" default="/robot_1/submap"/>
+  <arg name="candidate_topic" default="/robot_1/loop_candidate"/>
+  <arg name="candidate_array_topic" default="/robot_1/loop_candidates"/>
+  <arg name="candidate_pose_topic" default="/robot_1/loop_candidate_poses"/>
+  <arg name="candidate_score_cloud_topic" default="/robot_1/loop_candidate_score_cloud"/>
+  <arg name="frame_id" default="map"/>
+
+  <node pkg="fast_lio" type="loop_candidate_selector_node" name="loop_candidate_selector" output="screen">
+    <param name="default_robot_id" value="$(arg robot_id)"/>
+    <param name="submap_topic" value="$(arg submap_topic)"/>
+    <param name="candidate_topic" value="$(arg candidate_topic)"/>
+    <param name="candidate_array_topic" value="$(arg candidate_array_topic)"/>
+    <param name="candidate_pose_topic" value="$(arg candidate_pose_topic)"/>
+    <param name="candidate_score_cloud_topic" value="$(arg candidate_score_cloud_topic)"/>
+    <param name="frame_id" value="$(arg frame_id)"/>
+
+    <param name="voxel_size" value="1.0"/>
+    <param name="min_points_per_voxel" value="8"/>
+    <param name="eta_valid_voxel" value="0.01"/>
+
+    <param name="use_pose_reliability" value="true"/>
+    <param name="covariance_trans_weight" value="1.0"/>
+    <param name="covariance_rot_weight" value="1.0"/>
+
+    <param name="sector_num" value="36"/>
+    <param name="min_points_per_sector" value="20"/>
+    <param name="eta_height" value="1.0"/>
+    <param name="cloud_in_world_frame" value="false"/>
+
+    <param name="neighbor_radius" value="3"/>
+    <param name="trans_continuity_thresh" value="2.0"/>
+    <param name="rot_continuity_thresh_deg" value="20.0"/>
+
+    <param name="nms_distance" value="3.0"/>
+    <param name="max_candidate_num" value="0"/>
+    <param name="min_total_score" value="0.45"/>
+  </node>
+</launch>
