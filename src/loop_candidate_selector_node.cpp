@@ -220,15 +220,8 @@ private:
     const std::vector<int> selected =
         scorer_.selectCandidates(keyframes_, scores, nms_distance_, max_candidate_num_);
 
-    for (int idx : selected)
-    {
-      global_candidate_indices_.insert(idx);
-    }
-
-    const std::vector<int> global_candidates(global_candidate_indices_.begin(),
-                                             global_candidate_indices_.end());
-    publishCandidateViews(global_candidates, scores);
-    publishCandidates(global_candidates, scores);
+    publishCandidateViews(selected, scores);
+    publishCandidates(selected, scores);
   }
 
   dislam_msgs::LoopCandidate makeCandidateMessage(
@@ -269,6 +262,7 @@ private:
     array_msg.header.frame_id = frame_id_;
     array_msg.candidates.reserve(selected.size());
 
+    int new_candidate_num = 0;
     for (int idx : selected)
     {
       const dislam_msgs::LoopCandidate out =
@@ -281,6 +275,7 @@ private:
       {
         candidate_pub_.publish(out);
         published_candidate_indices_.insert(idx);
+        new_candidate_num++;
 
         ROS_INFO_STREAM("loop candidate selected robot=" << keyframes_[idx].robot_id
                         << " id=" << keyframes_[idx].index
@@ -293,6 +288,10 @@ private:
     }
 
     candidate_array_pub_.publish(array_msg);
+
+    ROS_INFO_STREAM("loop candidates published current=" << selected.size()
+                    << " new=" << new_candidate_num
+                    << " keyframes=" << keyframes_.size());
   }
 
   void publishCandidateViews(
@@ -346,7 +345,6 @@ private:
   KeyframeCloudScorer scorer_;
   std::vector<KeyframeCloudScorer::KeyFrame> keyframes_;
   std::vector<dislam_msgs::SubMap> submaps_;
-  std::set<int> global_candidate_indices_;
   std::set<int> published_candidate_indices_;
 
   std::string submap_topic_;
