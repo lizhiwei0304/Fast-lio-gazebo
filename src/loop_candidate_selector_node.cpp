@@ -220,8 +220,15 @@ private:
     const std::vector<int> selected =
         scorer_.selectCandidates(keyframes_, scores, nms_distance_, max_candidate_num_);
 
-    publishCandidateViews(selected, scores);
-    publishCandidates(selected, scores);
+    for (int idx : selected)
+    {
+      global_candidate_indices_.insert(idx);
+    }
+
+    const std::vector<int> global_candidates(global_candidate_indices_.begin(),
+                                             global_candidate_indices_.end());
+    publishCandidateViews(global_candidates, scores);
+    publishCandidates(global_candidates, scores);
   }
 
   dislam_msgs::LoopCandidate makeCandidateMessage(
@@ -339,6 +346,7 @@ private:
   KeyframeCloudScorer scorer_;
   std::vector<KeyframeCloudScorer::KeyFrame> keyframes_;
   std::vector<dislam_msgs::SubMap> submaps_;
+  std::set<int> global_candidate_indices_;
   std::set<int> published_candidate_indices_;
 
   std::string submap_topic_;
