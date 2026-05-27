@@ -36,6 +36,6 @@
 
     <param name="nms_distance" value="3.0"/>
     <param name="max_candidate_num" value="0"/>
-    <param name="min_total_score" value="0.75"/>
+    <param name="min_total_score" value="0.73"/>
   </node>
 </launch>
