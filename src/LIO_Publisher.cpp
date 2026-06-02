@@ -176,11 +176,15 @@ void LIO_Pub::OdomCallback(nav_msgs::Odometry msg)
 
     // Publish submap
     dislam_msgs::SubMap submapMsg;
-    // output.submap = pc;
-    // output.orthoImage = *orthoImage;
     submapMsg.keyframePC = output;
     submapMsg.pose = msg.pose;
+    // 关键帧编号
+    submapMsg.id = static_cast<uint32_t>(signal_num);
+    // 机器人编号
+    submapMsg.robot_id = static_cast<uint8_t>(std::stoi(RobotID));
     subMapPublisher_.publish(submapMsg);
+    
+    
     pointCloudPublisher_.publish(output);
     registeredCloud.reset(new pcl::PointCloud<pcl::PointXYZI>);
   }
