@@ -103,6 +103,16 @@ double elapsedMilliseconds(const std::chrono::steady_clock::time_point& start,
 {
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
+
+ros::Time subtractDurationClampedToZero(const ros::Time& stamp, double seconds)
+{
+  if (stamp.toSec() <= seconds)
+  {
+    return ros::Time(0);
+  }
+
+  return stamp - ros::Duration(seconds);
+}
 }  // namespace
 
 class LoopCandidateSelector
@@ -293,8 +303,8 @@ private:
 
   void pruneStateEstimationBuffer(const ros::Time& newest_stamp)
   {
-    const ros::Time min_stamp =
-        newest_stamp - ros::Duration(state_estimation_cache_duration_);
+    const ros::Time min_stamp = subtractDurationClampedToZero(
+        newest_stamp, state_estimation_cache_duration_);
     while (!state_estimation_buffer_.empty() &&
            state_estimation_buffer_.front().stamp < min_stamp)
     {
@@ -588,6 +598,7 @@ private:
 
     pcl::PointCloud<pcl::PointXYZI> score_cloud;
     score_cloud.header.frame_id = frame_id_;
+    score_cloud.header.stamp = 0;
     score_cloud.height = 1;
     score_cloud.is_dense = false;
     score_cloud.points.reserve(selected.size());
