@@ -1,6 +1,7 @@
 <launch>
   <arg name="robot_id" default="0"/>
   <arg name="submap_topic" default="/vehicle0/submap"/>
+  <arg name="state_estimation_topic" default="/vehicle0/state_estimation"/>
   <arg name="candidate_topic" default="/vehicle0/loop_candidate"/>
   <arg name="candidate_array_topic" default="/vehicle0/loop_candidates"/>
   <arg name="candidate_pose_topic" default="/vehicle0/loop_candidate_poses"/>
@@ -8,10 +9,14 @@
   <arg name="frame_id" default="map"/>
   <arg name="enable_timing_log" default="true"/>
   <arg name="timing_log_path" default="$(optenv HOME /tmp)/.ros/loop_candidate_selector_timing.csv"/>
+  <arg name="state_estimation_max_time_diff" default="0.05"/>
+  <arg name="state_estimation_cache_duration" default="30.0"/>
+  <arg name="require_state_estimation_pose" default="true"/>
 
   <node pkg="fast_lio" type="loop_candidate_selector_node" name="loop_candidate_selector" output="screen">
     <param name="default_robot_id" value="$(arg robot_id)"/>
     <param name="submap_topic" value="$(arg submap_topic)"/>
+    <param name="state_estimation_topic" value="$(arg state_estimation_topic)"/>
     <param name="candidate_topic" value="$(arg candidate_topic)"/>
     <param name="candidate_array_topic" value="$(arg candidate_array_topic)"/>
     <param name="candidate_pose_topic" value="$(arg candidate_pose_topic)"/>
@@ -20,6 +25,9 @@
     <param name="selection_mode" value="proposed"/>
     <param name="enable_timing_log" value="$(arg enable_timing_log)"/>
     <param name="timing_log_path" value="$(arg timing_log_path)"/>
+    <param name="state_estimation_max_time_diff" value="$(arg state_estimation_max_time_diff)"/>
+    <param name="state_estimation_cache_duration" value="$(arg state_estimation_cache_duration)"/>
+    <param name="require_state_estimation_pose" value="$(arg require_state_estimation_pose)"/>
 
     <param name="voxel_size" value="1.0"/>
     <param name="min_points_per_voxel" value="8"/>

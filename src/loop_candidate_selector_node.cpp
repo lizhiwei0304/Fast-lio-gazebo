@@ -4,6 +4,8 @@
 #include <dislam_msgs/LoopCandidates.h>
 #include <dislam_msgs/SubMap.h>
 #include <geometry_msgs/PoseArray.h>
+#include <geometry_msgs/PoseWithCovariance.h>
+#include <nav_msgs/Odometry.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <ros/ros.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -15,8 +17,11 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
+#include <deque>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -109,6 +114,8 @@ public:
         scorer_(loadScorerParams(pnh))
   {
     submap_topic_ = getParam<std::string>(pnh_, "submap_topic", "submap");
+    state_estimation_topic_ =
+        getParam<std::string>(pnh_, "state_estimation_topic", "state_estimation");
     candidate_topic_ =
         getParam<std::string>(pnh_, "candidate_topic", "loop_candidate");
     candidate_array_topic_ =
@@ -124,6 +131,12 @@ public:
     max_candidate_num_ = getParam<int>(pnh_, "max_candidate_num", 0);
     min_keyframes_before_selection_ =
         getParam<int>(pnh_, "min_keyframes_before_selection", 1);
+    state_estimation_cache_duration_ =
+        std::max(0.1, getParam<double>(pnh_, "state_estimation_cache_duration", 30.0));
+    state_estimation_max_time_diff_ =
+        std::max(0.0, getParam<double>(pnh_, "state_estimation_max_time_diff", 0.05));
+    require_state_estimation_pose_ =
+        getParam<bool>(pnh_, "require_state_estimation_pose", true);
     publish_all_candidates_each_update_ =
         getParam<bool>(pnh_, "publish_all_candidates_each_update", false);
     enable_timing_log_ =
@@ -138,6 +151,9 @@ public:
 
     submap_sub_ = nh_.subscribe(submap_topic_, 20,
                                 &LoopCandidateSelector::submapCallback, this);
+    state_estimation_sub_ =
+        nh_.subscribe(state_estimation_topic_, 200,
+                      &LoopCandidateSelector::stateEstimationCallback, this);
     candidate_pub_ =
         nh_.advertise<dislam_msgs::LoopCandidate>(candidate_topic_, 20);
     candidate_array_pub_ =
@@ -148,6 +164,9 @@ public:
         nh_.advertise<sensor_msgs::PointCloud2>(candidate_score_cloud_topic_, 1, true);
 
     ROS_INFO_STREAM("loop_candidate_selector subscribe: " << submap_topic_);
+    ROS_INFO_STREAM("loop_candidate_selector state estimation: "
+                    << state_estimation_topic_
+                    << " max_dt=" << state_estimation_max_time_diff_ << "s");
     ROS_INFO_STREAM("loop_candidate_selector candidate: " << candidate_topic_);
     ROS_INFO_STREAM("loop_candidate_selector candidate array: "
                     << candidate_array_topic_);
@@ -156,6 +175,12 @@ public:
   }
 
 private:
+  struct TimedStatePose
+  {
+    ros::Time stamp;
+    geometry_msgs::Pose pose;
+  };
+
   static KeyframeCloudScorer::Params loadScorerParams(const ros::NodeHandle& pnh)
   {
     KeyframeCloudScorer::Params params;
@@ -234,6 +259,95 @@ private:
     return params;
   }
 
+  void stateEstimationCallback(const nav_msgs::OdometryConstPtr& msg)
+  {
+    if (msg->header.stamp.isZero())
+    {
+      ROS_WARN_THROTTLE(2.0, "loop_candidate_selector received state_estimation with zero stamp");
+      return;
+    }
+
+    TimedStatePose item;
+    item.stamp = msg->header.stamp;
+    item.pose = msg->pose.pose;
+
+    auto it = std::lower_bound(
+        state_estimation_buffer_.begin(),
+        state_estimation_buffer_.end(),
+        item.stamp,
+        [](const TimedStatePose& lhs, const ros::Time& rhs) {
+          return lhs.stamp < rhs;
+        });
+
+    if (it != state_estimation_buffer_.end() && it->stamp == item.stamp)
+    {
+      *it = item;
+    }
+    else
+    {
+      state_estimation_buffer_.insert(it, item);
+    }
+
+    pruneStateEstimationBuffer(item.stamp);
+  }
+
+  void pruneStateEstimationBuffer(const ros::Time& newest_stamp)
+  {
+    const ros::Time min_stamp =
+        newest_stamp - ros::Duration(state_estimation_cache_duration_);
+    while (!state_estimation_buffer_.empty() &&
+           state_estimation_buffer_.front().stamp < min_stamp)
+    {
+      state_estimation_buffer_.pop_front();
+    }
+  }
+
+  bool lookupStateEstimationPose(const ros::Time& stamp,
+                                 geometry_msgs::Pose& pose,
+                                 double& best_time_diff) const
+  {
+    best_time_diff = std::numeric_limits<double>::infinity();
+    if (stamp.isZero() || state_estimation_buffer_.empty())
+    {
+      return false;
+    }
+
+    const TimedStatePose* best = nullptr;
+    auto it = std::lower_bound(
+        state_estimation_buffer_.begin(),
+        state_estimation_buffer_.end(),
+        stamp,
+        [](const TimedStatePose& lhs, const ros::Time& rhs) {
+          return lhs.stamp < rhs;
+        });
+
+    auto consider = [&](std::deque<TimedStatePose>::const_iterator candidate) {
+      const double dt = std::abs((candidate->stamp - stamp).toSec());
+      if (dt < best_time_diff)
+      {
+        best_time_diff = dt;
+        best = &(*candidate);
+      }
+    };
+
+    if (it != state_estimation_buffer_.end())
+    {
+      consider(it);
+    }
+    if (it != state_estimation_buffer_.begin())
+    {
+      consider(std::prev(it));
+    }
+
+    if (best == nullptr || best_time_diff > state_estimation_max_time_diff_)
+    {
+      return false;
+    }
+
+    pose = best->pose;
+    return true;
+  }
+
   void submapCallback(const dislam_msgs::SubMapConstPtr& msg)
   {
     KeyframeCloudScorer::CloudT::Ptr cloud(new KeyframeCloudScorer::CloudT);
@@ -250,15 +364,42 @@ private:
             ? index
             : static_cast<int>(std::min<uint32_t>(
                   msg->id, static_cast<uint32_t>(std::numeric_limits<int>::max())));
+    const ros::Time submap_stamp = msg->keyframePC.header.stamp;
+
+    geometry_msgs::PoseWithCovariance keyframe_pose = msg->pose;
+    geometry_msgs::Pose state_pose;
+    double state_time_diff = std::numeric_limits<double>::infinity();
+    if (lookupStateEstimationPose(submap_stamp, state_pose, state_time_diff))
+    {
+      keyframe_pose.pose = state_pose;
+    }
+    else
+    {
+      ROS_WARN_STREAM_THROTTLE(
+          2.0,
+          "loop_candidate_selector cannot match state_estimation for submap stamp "
+              << submap_stamp.toSec()
+              << ", buffer_size=" << state_estimation_buffer_.size()
+              << ", best_dt="
+              << (std::isfinite(state_time_diff) ? state_time_diff : -1.0)
+              << "s, max_dt=" << state_estimation_max_time_diff_ << "s");
+      if (require_state_estimation_pose_)
+      {
+        return;
+      }
+    }
+
     KeyframeCloudScorer::KeyFrame kf;
     kf.robot_id = msg->robot_id != 0 ? msg->robot_id : default_robot_id_;
     kf.index = source_id;
-    kf.pose = poseMsgToIsometry(msg->pose.pose);
+    kf.pose = poseMsgToIsometry(keyframe_pose.pose);
     kf.covariance = covarianceMsgToEigen(msg->pose.covariance);
     kf.cloud = cloud;
 
     keyframes_.emplace_back(kf);
-    submaps_.emplace_back(*msg);
+    dislam_msgs::SubMap submap = *msg;
+    submap.pose = keyframe_pose;
+    submaps_.emplace_back(submap);
 
     if (static_cast<int>(keyframes_.size()) < min_keyframes_before_selection_)
     {
@@ -479,6 +620,7 @@ private:
   ros::NodeHandle nh_;
   ros::NodeHandle pnh_;
   ros::Subscriber submap_sub_;
+  ros::Subscriber state_estimation_sub_;
   ros::Publisher candidate_pub_;
   ros::Publisher candidate_array_pub_;
   ros::Publisher candidate_pose_pub_;
@@ -488,10 +630,12 @@ private:
   KeyframeCloudScorer::SelectionMode selection_mode_ =
       KeyframeCloudScorer::SelectionMode::PROPOSED;
   KeyframeCloudScorer::KeyFrameVector keyframes_;
+  std::deque<TimedStatePose> state_estimation_buffer_;
   std::vector<dislam_msgs::SubMap> submaps_;
   std::set<int> published_candidate_indices_;
 
   std::string submap_topic_;
+  std::string state_estimation_topic_;
   std::string candidate_topic_;
   std::string candidate_array_topic_;
   std::string candidate_pose_topic_;
@@ -501,8 +645,11 @@ private:
   std::string frame_id_;
   int default_robot_id_ = 0;
   double nms_distance_ = 3.0;
+  double state_estimation_cache_duration_ = 30.0;
+  double state_estimation_max_time_diff_ = 0.05;
   int max_candidate_num_ = 0;
   int min_keyframes_before_selection_ = 1;
+  bool require_state_estimation_pose_ = true;
   bool publish_all_candidates_each_update_ = false;
   bool enable_timing_log_ = true;
   std::ofstream timing_log_stream_;

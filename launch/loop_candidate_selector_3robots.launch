@@ -6,6 +6,7 @@
     <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
       <arg name="robot_id" value="0"/>
       <arg name="submap_topic" value="/vehicle0/submap"/>
+      <arg name="state_estimation_topic" value="/vehicle0/state_estimation"/>
       <arg name="candidate_topic" value="/vehicle0/loop_candidate"/>
       <arg name="candidate_array_topic" value="/vehicle0/loop_candidates"/>
       <arg name="candidate_pose_topic" value="/vehicle0/loop_candidate_poses"/>
@@ -20,6 +21,7 @@
     <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
       <arg name="robot_id" value="1"/>
       <arg name="submap_topic" value="/vehicle1/submap"/>
+      <arg name="state_estimation_topic" value="/vehicle1/state_estimation"/>
       <arg name="candidate_topic" value="/vehicle1/loop_candidate"/>
       <arg name="candidate_array_topic" value="/vehicle1/loop_candidates"/>
       <arg name="candidate_pose_topic" value="/vehicle1/loop_candidate_poses"/>
@@ -34,6 +36,7 @@
     <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
       <arg name="robot_id" value="2"/>
       <arg name="submap_topic" value="/vehicle2/submap"/>
+      <arg name="state_estimation_topic" value="/vehicle2/state_estimation"/>
       <arg name="candidate_topic" value="/vehicle2/loop_candidate"/>
       <arg name="candidate_array_topic" value="/vehicle2/loop_candidates"/>
       <arg name="candidate_pose_topic" value="/vehicle2/loop_candidate_poses"/>

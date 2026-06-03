@@ -44,6 +44,7 @@
         <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
             <arg name="robot_id" value="$(arg robot_id)" />
             <arg name="submap_topic" value="/$(arg namespace)/submap" />
+            <arg name="state_estimation_topic" value="/$(arg namespace)/state_estimation" />
             <arg name="candidate_topic" value="/$(arg namespace)/loop_candidate" />
             <arg name="candidate_array_topic" value="/$(arg namespace)/loop_candidates" />
             <arg name="candidate_pose_topic" value="/$(arg namespace)/loop_candidate_poses" />
