@@ -17,6 +17,7 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <set>
 #include <sstream>
 #include <string>
@@ -244,9 +245,14 @@ private:
     }
 
     const int index = static_cast<int>(keyframes_.size());
+    const int source_id =
+        msg->id == 0
+            ? index
+            : static_cast<int>(std::min<uint32_t>(
+                  msg->id, static_cast<uint32_t>(std::numeric_limits<int>::max())));
     KeyframeCloudScorer::KeyFrame kf;
     kf.robot_id = msg->robot_id != 0 ? msg->robot_id : default_robot_id_;
-    kf.index = index;
+    kf.index = source_id;
     kf.pose = poseMsgToIsometry(msg->pose.pose);
     kf.covariance = covarianceMsgToEigen(msg->pose.covariance);
     kf.cloud = cloud;

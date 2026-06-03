@@ -1,10 +1,10 @@
 <launch>
-  <arg name="robot_id" default="1"/>
-  <arg name="submap_topic" default="/robot_1/submap"/>
-  <arg name="candidate_topic" default="/robot_1/loop_candidate"/>
-  <arg name="candidate_array_topic" default="/robot_1/loop_candidates"/>
-  <arg name="candidate_pose_topic" default="/robot_1/loop_candidate_poses"/>
-  <arg name="candidate_score_cloud_topic" default="/robot_1/loop_candidate_score_cloud"/>
+  <arg name="robot_id" default="0"/>
+  <arg name="submap_topic" default="/vehicle0/submap"/>
+  <arg name="candidate_topic" default="/vehicle0/loop_candidate"/>
+  <arg name="candidate_array_topic" default="/vehicle0/loop_candidates"/>
+  <arg name="candidate_pose_topic" default="/vehicle0/loop_candidate_poses"/>
+  <arg name="candidate_score_cloud_topic" default="/vehicle0/loop_candidate_score_cloud"/>
   <arg name="frame_id" default="map"/>
   <arg name="enable_timing_log" default="true"/>
   <arg name="timing_log_path" default="$(optenv HOME /tmp)/.ros/loop_candidate_selector_timing.csv"/>
