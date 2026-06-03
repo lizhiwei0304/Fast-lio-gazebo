@@ -7,6 +7,9 @@
     <arg name="sensor_name" default="velodyne" />
     <arg name="config" default="$(find fast_lio)/config/velodyne16_simulation_robot1.yaml" />
     <arg name="loop_candidate_selector" default="true" />
+    <arg name="loop_candidate_frame_id" default="map" />
+    <arg name="loop_candidate_timing_log" default="true" />
+    <arg name="loop_candidate_timing_log_path" default="$(optenv HOME /tmp)/.ros/loop_candidate_selector_$(arg namespace)_timing.csv" />
 
     <arg name="feature_extract_enable" default="false" />
     <arg name="point_filter_num" default="1" />
@@ -37,10 +40,19 @@
         <param name="dis_th" type="double" value="$(arg dis_th)" />
     </node>
 
-    <include if="$(arg loop_candidate_selector)" file="$(find fast_lio)/launch/loop_candidate_selector.launch">
-        <arg name="robot_namespace" value="$(arg namespace)" />
-        <arg name="robot_id" value="$(arg robot_id)" />
-    </include>
+    <group if="$(arg loop_candidate_selector)" ns="$(arg namespace)">
+        <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
+            <arg name="robot_id" value="$(arg robot_id)" />
+            <arg name="submap_topic" value="/$(arg namespace)/submap" />
+            <arg name="candidate_topic" value="/$(arg namespace)/loop_candidate" />
+            <arg name="candidate_array_topic" value="/$(arg namespace)/loop_candidates" />
+            <arg name="candidate_pose_topic" value="/$(arg namespace)/loop_candidate_poses" />
+            <arg name="candidate_score_cloud_topic" value="/$(arg namespace)/loop_candidate_score_cloud" />
+            <arg name="frame_id" value="$(arg loop_candidate_frame_id)" />
+            <arg name="enable_timing_log" value="$(arg loop_candidate_timing_log)" />
+            <arg name="timing_log_path" value="$(arg loop_candidate_timing_log_path)" />
+        </include>
+    </group>
 
     <group if="$(arg rviz)">
         <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz_$(arg namespace)"

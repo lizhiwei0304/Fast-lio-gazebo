@@ -1,5 +1,8 @@
 <launch>
     <arg name="rviz" default="false" />
+    <arg name="loop_candidate_selector" default="true" />
+    <arg name="loop_candidate_frame_id" default="map" />
+    <arg name="loop_candidate_timing_log" default="true" />
 
     <include file="$(find fast_lio)/launch/simulation_rs16.launch">
         <arg name="rviz" value="$(arg rviz)" />
@@ -7,6 +10,10 @@
         <arg name="robot_id" value="0" />
         <arg name="sensor_name" value="velodyne" />
         <arg name="config" value="$(find fast_lio)/config/velodyne16_simulation_robot1.yaml" />
+        <arg name="loop_candidate_selector" value="$(arg loop_candidate_selector)" />
+        <arg name="loop_candidate_frame_id" value="$(arg loop_candidate_frame_id)" />
+        <arg name="loop_candidate_timing_log" value="$(arg loop_candidate_timing_log)" />
+        <arg name="loop_candidate_timing_log_path" value="$(optenv HOME /tmp)/.ros/loop_candidate_selector_vehicle0_timing.csv" />
     </include>
 
     <include file="$(find fast_lio)/launch/simulation_rs16.launch">
@@ -15,6 +22,10 @@
         <arg name="robot_id" value="1" />
         <arg name="sensor_name" value="velodyne" />
         <arg name="config" value="$(find fast_lio)/config/velodyne16_simulation_robot2.yaml" />
+        <arg name="loop_candidate_selector" value="$(arg loop_candidate_selector)" />
+        <arg name="loop_candidate_frame_id" value="$(arg loop_candidate_frame_id)" />
+        <arg name="loop_candidate_timing_log" value="$(arg loop_candidate_timing_log)" />
+        <arg name="loop_candidate_timing_log_path" value="$(optenv HOME /tmp)/.ros/loop_candidate_selector_vehicle1_timing.csv" />
     </include>
 
     <include file="$(find fast_lio)/launch/simulation_rs16.launch">
@@ -23,5 +34,9 @@
         <arg name="robot_id" value="2" />
         <arg name="sensor_name" value="velodyne" />
         <arg name="config" value="$(find fast_lio)/config/velodyne16_simulation_robot3.yaml" />
+        <arg name="loop_candidate_selector" value="$(arg loop_candidate_selector)" />
+        <arg name="loop_candidate_frame_id" value="$(arg loop_candidate_frame_id)" />
+        <arg name="loop_candidate_timing_log" value="$(arg loop_candidate_timing_log)" />
+        <arg name="loop_candidate_timing_log_path" value="$(optenv HOME /tmp)/.ros/loop_candidate_selector_vehicle2_timing.csv" />
     </include>
 </launch>
