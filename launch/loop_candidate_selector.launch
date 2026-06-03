@@ -1,14 +1,15 @@
 <launch>
-  <arg name="robot_namespace" default="vehicle0"/>
-  <arg name="robot_id" default="0"/>
-  <arg name="submap_topic" default="/$(arg robot_namespace)/submap"/>
-  <arg name="candidate_topic" default="/$(arg robot_namespace)/loop_candidate"/>
-  <arg name="candidate_array_topic" default="/$(arg robot_namespace)/loop_candidates"/>
-  <arg name="candidate_pose_topic" default="/$(arg robot_namespace)/loop_candidate_poses"/>
-  <arg name="candidate_score_cloud_topic" default="/$(arg robot_namespace)/loop_candidate_score_cloud"/>
+  <arg name="robot_id" default="1"/>
+  <arg name="submap_topic" default="/robot_1/submap"/>
+  <arg name="candidate_topic" default="/robot_1/loop_candidate"/>
+  <arg name="candidate_array_topic" default="/robot_1/loop_candidates"/>
+  <arg name="candidate_pose_topic" default="/robot_1/loop_candidate_poses"/>
+  <arg name="candidate_score_cloud_topic" default="/robot_1/loop_candidate_score_cloud"/>
   <arg name="frame_id" default="map"/>
+  <arg name="enable_timing_log" default="true"/>
+  <arg name="timing_log_path" default="$(optenv HOME /tmp)/.ros/loop_candidate_selector_timing.csv"/>
 
-  <node pkg="fast_lio" type="loop_candidate_selector_node" name="loop_candidate_selector_$(arg robot_namespace)" output="screen">
+  <node pkg="fast_lio" type="loop_candidate_selector_node" name="loop_candidate_selector" output="screen">
     <param name="default_robot_id" value="$(arg robot_id)"/>
     <param name="submap_topic" value="$(arg submap_topic)"/>
     <param name="candidate_topic" value="$(arg candidate_topic)"/>
@@ -16,26 +17,41 @@
     <param name="candidate_pose_topic" value="$(arg candidate_pose_topic)"/>
     <param name="candidate_score_cloud_topic" value="$(arg candidate_score_cloud_topic)"/>
     <param name="frame_id" value="$(arg frame_id)"/>
+    <param name="selection_mode" value="proposed"/>
+    <param name="enable_timing_log" value="$(arg enable_timing_log)"/>
+    <param name="timing_log_path" value="$(arg timing_log_path)"/>
 
-    <param name="voxel_size" value="1.5"/>
-    <param name="min_points_per_voxel" value="5"/>
-    <param name="eta_valid_voxel" value="0.02"/>
-
-    <param name="use_pose_reliability" value="true"/>
-    <param name="covariance_trans_weight" value="1.0"/>
-    <param name="covariance_rot_weight" value="1.0"/>
-
-    <param name="sector_num" value="36"/>
-    <param name="min_points_per_sector" value="20"/>
-    <param name="eta_height" value="1.0"/>
+    <param name="voxel_size" value="1.0"/>
+    <param name="min_points_per_voxel" value="8"/>
+    <param name="min_points_cloud" value="100"/>
+    <param name="eta_voxel_count" value="150.0"/>
+    <param name="alpha_geo_structure" value="0.40"/>
+    <param name="alpha_geo_distribution" value="0.45"/>
+    <param name="alpha_geo_vertical" value="0.15"/>
+    <param name="eta_vertical" value="1.0"/>
+    <param name="min_horizontal_norm" value="0.2"/>
     <param name="cloud_in_world_frame" value="false"/>
 
-    <param name="neighbor_radius" value="3"/>
-    <param name="trans_continuity_thresh" value="2.0"/>
-    <param name="rot_continuity_thresh_deg" value="20.0"/>
+    <param name="use_pose_reliability" value="true"/>
+    <param name="eta_pose" value="-1.0"/>
+    <param name="alpha_pose_self" value="0.5"/>
+    <param name="covariance_trans_weight" value="1.0"/>
+    <param name="covariance_rot_weight" value="0.2"/>
 
-    <param name="nms_distance" value="3.0"/>
+    <param name="neighbor_radius" value="3"/>
+    <param name="max_keyframe_gap" value="2.0"/>
+    <param name="eta_turn" value="1.0"/>
+
+    <param name="w_geo" value="0.45"/>
+    <param name="w_pose" value="0.40"/>
+    <param name="w_continuity" value="0.15"/>
+    <param name="tau_geo" value="0.65"/>
+    <param name="tau_pose" value="0.65"/>
+    <param name="tau_total" value="0.65"/>
+
+    <param name="nms_distance" value="5.0"/>
     <param name="max_candidate_num" value="0"/>
-    <param name="min_total_score" value="0.73"/>
+    <param name="min_keyframes_before_selection" value="1"/>
+    <param name="publish_all_candidates_each_update" value="false"/>
   </node>
 </launch>

@@ -1,0 +1,46 @@
+<launch>
+  <arg name="frame_id" default="map"/>
+  <arg name="enable_timing_log" default="true"/>
+
+  <group ns="vehicle0">
+    <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
+      <arg name="robot_id" value="1"/>
+      <arg name="submap_topic" value="/vehicle0/submap"/>
+      <arg name="candidate_topic" value="/vehicle0/loop_candidate"/>
+      <arg name="candidate_array_topic" value="/vehicle0/loop_candidates"/>
+      <arg name="candidate_pose_topic" value="/vehicle0/loop_candidate_poses"/>
+      <arg name="candidate_score_cloud_topic" value="/vehicle0/loop_candidate_score_cloud"/>
+      <arg name="frame_id" value="$(arg frame_id)"/>
+      <arg name="enable_timing_log" value="$(arg enable_timing_log)"/>
+      <arg name="timing_log_path" value="$(optenv HOME /tmp)/.ros/loop_candidate_selector_vehicle0_timing.csv"/>
+    </include>
+  </group>
+
+  <group ns="vehicle1">
+    <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
+      <arg name="robot_id" value="2"/>
+      <arg name="submap_topic" value="/vehicle1/submap"/>
+      <arg name="candidate_topic" value="/vehicle1/loop_candidate"/>
+      <arg name="candidate_array_topic" value="/vehicle1/loop_candidates"/>
+      <arg name="candidate_pose_topic" value="/vehicle1/loop_candidate_poses"/>
+      <arg name="candidate_score_cloud_topic" value="/vehicle1/loop_candidate_score_cloud"/>
+      <arg name="frame_id" value="$(arg frame_id)"/>
+      <arg name="enable_timing_log" value="$(arg enable_timing_log)"/>
+      <arg name="timing_log_path" value="$(optenv HOME /tmp)/.ros/loop_candidate_selector_vehicle1_timing.csv"/>
+    </include>
+  </group>
+
+  <group ns="vehicle2">
+    <include file="$(find fast_lio)/launch/loop_candidate_selector.launch">
+      <arg name="robot_id" value="3"/>
+      <arg name="submap_topic" value="/vehicle2/submap"/>
+      <arg name="candidate_topic" value="/vehicle2/loop_candidate"/>
+      <arg name="candidate_array_topic" value="/vehicle2/loop_candidates"/>
+      <arg name="candidate_pose_topic" value="/vehicle2/loop_candidate_poses"/>
+      <arg name="candidate_score_cloud_topic" value="/vehicle2/loop_candidate_score_cloud"/>
+      <arg name="frame_id" value="$(arg frame_id)"/>
+      <arg name="enable_timing_log" value="$(arg enable_timing_log)"/>
+      <arg name="timing_log_path" value="$(optenv HOME /tmp)/.ros/loop_candidate_selector_vehicle2_timing.csv"/>
+    </include>
+  </group>
+</launch>

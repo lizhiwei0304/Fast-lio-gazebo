@@ -1,15 +1,13 @@
 #pragma once
 
-// PCL 点云基础功能：
-// point_tests.h 用于判断点是否为有限值，例如 pcl::isFinite(pt)
 #include <pcl/common/point_tests.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-// Eigen 用于矩阵、位姿、特征值分解等数学计算
 #include <Eigen/Dense>
 #include <Eigen/Eigenvalues>
 #include <Eigen/Geometry>
+#include <Eigen/StdVector>
 
 #include <algorithm>
 #include <cmath>
@@ -18,432 +16,184 @@
 #include <unordered_map>
 #include <vector>
 
-/**
- * @brief 关键帧点云评分器
- *
- * 该类用于对历史关键帧点云进行质量评估，并从中筛选适合作为
- * 主动回环锚点或候选回环关键帧的节点。
- *
- * 评分主要包含四个方面：
- * 1. q_geo  ：几何结构质量评分
- * 2. q_pose ：位姿可靠性评分
- * 3. q_spa  ：空间观测分布评分
- * 4. q_con  ：轨迹连续性评分
- *
- * 最终综合评分：
- *
- * q_total = w_geo * q_geo
- *         + w_pose * q_pose
- *         + w_spa * q_spa
- *         + w_con * q_con
- *
- * 如果各项评分和总评分都超过阈值，则该关键帧被认为是候选回环锚点。
- */
 class KeyframeCloudScorer
 {
 public:
-  // 点类型：XYZ + intensity
-  using PointT = pcl::PointXYZI;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  // 点云类型
+  using PointT = pcl::PointXYZI;
   using CloudT = pcl::PointCloud<PointT>;
 
-  /**
-   * @brief 关键帧数据结构
-   *
-   * 每个关键帧包含：
-   * - 所属机器人编号
-   * - 当前关键帧索引
-   * - 关键帧位姿
-   * - 位姿协方差
-   * - 对应局部点云
-   */
   struct KeyFrame
   {
-    // 该关键帧所属机器人编号
-    int robot_id = 0;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-    // 关键帧索引，一般对应 keyframes_ 中的下标
+    int robot_id = 0;
     int index = 0;
 
-    // 关键帧位姿，使用 Eigen::Isometry3d 表示 SE(3) 位姿
     Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
 
-    // 6 维位姿协方差矩阵
-    // 一般对应 [x, y, z, roll, pitch, yaw] 或李代数扰动量
     Eigen::Matrix<double, 6, 6> covariance =
         Eigen::Matrix<double, 6, 6>::Zero();
 
-    // 关键帧点云
     CloudT::Ptr cloud;
   };
 
-  /**
-   * @brief 评分器参数结构体
-   *
-   * 这里集中存放所有评分相关参数，包括：
-   * - 体素几何结构评分参数
-   * - 位姿可靠性评分参数
-   * - 空间分布评分参数
-   * - 轨迹连续性评分参数
-   * - 综合评分权重
-   * - 候选关键帧筛选阈值
-   */
-  struct Params
+  using KeyFrameVector = std::vector<KeyFrame, Eigen::aligned_allocator<KeyFrame>>;
+  using Vector3dVector =
+      std::vector<Eigen::Vector3d, Eigen::aligned_allocator<Eigen::Vector3d>>;
+
+  enum class SelectionMode
   {
-    /**
-     * -------------------------------
-     * 1. 几何结构评分相关参数
-     * -------------------------------
-     */
-
-    // 体素大小，单位通常为 m
-    // 点云会按照该尺寸划分为多个体素
-    double voxel_size = 1.0;
-
-    // 每个体素内至少需要多少个点才参与几何评分
-    // 点数过少时，该体素的协方差和特征值不稳定
-    int min_points_per_voxel = 8;
-
-    // 线性结构权重
-    // 线性结构通常对应边缘、杆状物、长条结构等
-    double w_line = 0.35;
-
-    // 平面结构权重
-    // 平面结构通常对应墙面、地面、立面等
-    double w_plane = 0.45;
-
-    // 散乱结构权重
-    // 散乱结构表示点云在三个方向都有分布
-    double w_scatter = 0.20;
-
-    // 有效体素数量增益系数
-    // 有效体素越多，说明该关键帧点云覆盖的结构越丰富
-    double eta_valid_voxel = 0.01;
-
-    /**
-     * -------------------------------
-     * 2. 位姿可靠性评分相关参数
-     * -------------------------------
-     */
-
-    // 是否使用位姿可靠性评分
-    // 如果为 false，则 q_pose 恒为 1.0
-    bool use_pose_reliability = true;
-
-    // 当前关键帧自身协方差惩罚系数
-    // 协方差越大，exp(-eta_pose_self * uncertainty) 越小
-    double eta_pose_self = 1.0;
-
-    // 邻域关键帧平均协方差惩罚系数
-    double eta_pose_neighbor = 1.0;
-
-    // 当前关键帧自身位姿可靠性所占权重
-    // 1 - alpha_pose_self 是邻域平均可靠性权重
-    double alpha_pose_self = 0.6;
-
-    // 协方差加权矩阵
-    // 可用于对平移或旋转方向赋予不同权重
-    Eigen::Matrix<double, 6, 6> covariance_weight =
-        Eigen::Matrix<double, 6, 6>::Identity();
-
-    /**
-     * -------------------------------
-     * 3. 空间分布评分相关参数
-     * -------------------------------
-     */
-
-    // 方位角方向划分的扇区数量
-    // 例如 36 表示每 10 度一个扇区
-    int sector_num = 36;
-
-    // 每个扇区至少需要多少个点才认为该扇区有效
-    int min_points_per_sector = 20;
-
-    // 方位覆盖率评分权重
-    // 有效扇区越多，说明点云水平观测覆盖越完整
-    double w_azimuth_cover = 0.30;
-
-    // 方位均匀性评分权重
-    // 使用熵衡量不同扇区点数分布是否均匀
-    double w_azimuth_uniform = 0.30;
-
-    // 最大空缺角惩罚项权重
-    // 空缺角越大，说明某个方向长期没有观测
-    double w_max_gap = 0.20;
-
-    // 高度变化评分权重
-    // 高度变化越丰富，说明三维结构越明显
-    double w_height = 0.20;
-
-    // 高度变化增益系数
-    double eta_height = 1.0;
-
-    // 输入点云是否已经在世界坐标系下
-    // false：默认点云已经在关键帧局部坐标系下
-    // true ：点云在世界系下，需要通过 pose.inverse() 转回局部系
-    bool cloud_in_world_frame = false;
-
-    /**
-     * -------------------------------
-     * 4. 轨迹连续性评分相关参数
-     * -------------------------------
-     */
-
-    // 邻域半径
-    // 对 target_idx 前后 neighbor_radius 个关键帧进行邻域评价
-    int neighbor_radius = 3;
-
-    // 相邻关键帧之间的最大平移连续性阈值
-    // 如果相邻关键帧平移距离超过该值，则认为轨迹存在跳变
-    double trans_continuity_thresh = 2.0;
-
-    // 相邻关键帧之间的最大旋转连续性阈值
-    // 默认 20 度，转为弧度
-    double rot_continuity_thresh = 20.0 * 3.14159265358979323846 / 180.0;
-
-    /**
-     * -------------------------------
-     * 5. 综合评分权重
-     * -------------------------------
-     */
-
-    // 几何结构评分权重
-    double w_geo = 0.35;
-
-    // 位姿可靠性评分权重
-    double w_pose = 0.20;
-
-    // 空间分布评分权重
-    double w_spa = 0.30;
-
-    // 轨迹连续性评分权重
-    double w_con = 0.15;
-
-    /**
-     * -------------------------------
-     * 6. 候选关键帧筛选阈值
-     * -------------------------------
-     */
-
-    // 几何评分最低阈值
-    double min_geo_score = 0.25;
-
-    // 位姿评分最低阈值
-    double min_pose_score = 0.20;
-
-    // 空间分布评分最低阈值
-    double min_spa_score = 0.25;
-
-    // 轨迹连续性评分最低阈值
-    double min_con_score = 0.50;
-
-    // 综合评分最低阈值
-    double min_total_score = 0.45;
+    GEO,       // 对应 Python anchors_geo.csv: q_geo >= tau_geo
+    GEO_POSE,  // 对应 Python anchors_pose.csv: q_geo_pose >= tau_pose
+    PROPOSED  // 对应 Python anchors_proposed.csv: q_total >= tau_total
   };
 
-  /**
-   * @brief 单个关键帧的评分结果
-   */
+  struct Params
+  {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    Params()
+    {
+      covariance_weight.setZero();
+      covariance_weight.diagonal() << 1.0, 1.0, 1.0, 0.2, 0.2, 0.2;
+    }
+
+    // 与 select_loop_anchors_from_dislam_bag_modified.py 的新版默认参数保持一致。
+    double voxel_size = 0.5;
+    int min_points_per_voxel = 5;
+    int min_points_cloud = 100;
+
+    // 2.1 几何结构质量：有效结构数量 + 局部结构显著性 + 水平约束方向分布 + 垂直结构支撑。
+    double eta_voxel_count = 150.0;
+    double alpha_geo_structure = 0.30;
+    double alpha_geo_distribution = 0.55;
+    double alpha_geo_vertical = 0.15;
+    double eta_vertical = 2.0;
+    double min_horizontal_norm = 0.2;
+
+    // false: keyframe cloud 已经在关键帧局部坐标系。
+    // true : keyframe cloud 在世界坐标系，需要用 pose.inverse() 转到局部坐标系。
+    bool cloud_in_world_frame = false;
+
+    // 2.2 位姿约束可靠性。
+    bool use_pose_reliability = true;
+    double eta_pose = -1.0;  // <=0 时使用所有有效 raw uncertainty 的 90% 分位数。
+    double alpha_pose_self = 0.5;
+    Eigen::Matrix<double, 6, 6> covariance_weight;
+
+    // 轨迹连续性。
+    int neighbor_radius = 3;
+    double max_keyframe_gap = 5.0;
+    double eta_turn = 1.0;
+
+    // 综合质量评分：只包含 q_geo、q_pose、q_continuity。
+    double w_geo = 0.45;
+    double w_pose = 0.40;
+    double w_continuity = 0.15;
+
+    // 与 Python tau_* 保持一致。
+    double tau_geo = 0.65;
+    double tau_pose = 0.65;
+    double tau_total = 0.65;
+  };
+
   struct Score
   {
-    // 几何结构质量评分
+    // 2.1 几何结构质量及其调试分量。
     double q_geo = 0.0;
+    double q_geo_count = 0.0;
+    double q_geo_structure = 0.0;
+    double q_geo_distribution = 0.0;
+    double q_geo_vertical = 0.0;
 
-    // 位姿可靠性评分
+    int geo_total_voxels = 0;
+    int geo_valid_voxels = 0;
+    int geo_direction_voxels = 0;
+    double geo_z_range = 0.0;
+
+    // 2.2 位姿约束可靠性。
     double q_pose = 0.0;
 
-    // 空间观测分布评分
-    double q_spa = 0.0;
+    // 轨迹连续性。
+    double q_continuity = 0.0;
 
-    // 轨迹连续性评分
-    double q_con = 0.0;
-
-    // 综合评分
+    // 组合评分，对应 Python 输出字段。
+    double q_geo_pose = 0.0;
     double q_total = 0.0;
 
-    // 有效体素数量
-    int valid_voxel_num = 0;
-
-    // 有效方位扇区数量
-    int valid_sector_num = 0;
-
-    // 点云高度范围
-    // 使用 95% 分位高度与 5% 分位高度之差，避免极端离群点影响
-    double height_range = 0.0;
-
-    // 最大方位空缺角
-    // 表示水平观测中最大未覆盖角度
-    double max_gap_angle = 0.0;
-
-    // 是否满足候选关键帧筛选条件
     bool is_candidate = false;
   };
 
-  /**
-   * @brief 默认构造函数
-   *
-   * 使用默认参数 Params()
-   */
-  KeyframeCloudScorer();
+  KeyframeCloudScorer() = default;
 
-  /**
-   * @brief 带参数构造函数
-   *
-   * @param params 外部传入的评分参数
-   */
-  explicit KeyframeCloudScorer(const Params& params);
-
-  /**
-   * @brief 评估单个关键帧
-   *
-   * @param keyframes 全部历史关键帧
-   * @param target_idx 待评估关键帧索引
-   * @return Score 当前关键帧的评分结果
-   *
-   * 该函数会依次计算：
-   * 1. 几何结构质量 q_geo
-   * 2. 位姿可靠性 q_pose
-   * 3. 空间分布质量 q_spa
-   * 4. 轨迹连续性 q_con
-   *
-   * 然后根据权重计算综合评分 q_total。
-   * 如果各项评分均超过对应阈值，则 is_candidate = true。
-   */
-  Score evaluateOne(const std::vector<KeyFrame>& keyframes, int target_idx) const
+  explicit KeyframeCloudScorer(const Params& params)
+      : params_(params)
   {
-    Score score;
-
-    // 索引越界保护
-    if (target_idx < 0 || target_idx >= static_cast<int>(keyframes.size()))
-    {
-      return score;
-    }
-
-    const KeyFrame& kf = keyframes[target_idx];
-
-    // 点云为空时无法评价，直接返回默认 0 分
-    if (!kf.cloud || kf.cloud->empty())
-    {
-      return score;
-    }
-
-    // 计算几何结构质量评分
-    // 同时返回有效体素数量
-    score.q_geo = computeGeometryScore(kf, score.valid_voxel_num);
-
-    // 计算位姿可靠性评分
-    // 主要依据当前关键帧及其邻域关键帧的位姿协方差
-    score.q_pose = computePoseReliabilityScore(keyframes, target_idx);
-
-    // 计算空间分布评分
-    // 同时返回有效扇区数、高度范围、最大空缺角
-    score.q_spa = computeSpatialDistributionScore(
-        kf, score.valid_sector_num, score.height_range, score.max_gap_angle);
-
-    // 计算轨迹连续性评分
-    // 判断当前关键帧附近的轨迹是否平滑、连续
-    score.q_con = computeTrajectoryContinuityScore(keyframes, target_idx);
-
-    // 计算综合评分
-    score.q_total =
-        params_.w_geo * score.q_geo +
-        params_.w_pose * score.q_pose +
-        params_.w_spa * score.q_spa +
-        params_.w_con * score.q_con;
-
-    // 将综合评分限制在 [0, 1]
-    score.q_total = clamp01(score.q_total);
-
-    // 判断是否满足候选关键帧条件
-    // 这里不仅要求总分足够高，也要求每个子指标不能太差
-    score.is_candidate =
-        score.q_geo >= params_.min_geo_score &&
-        score.q_pose >= params_.min_pose_score &&
-        score.q_spa >= params_.min_spa_score &&
-        score.q_con >= params_.min_con_score &&
-        score.q_total >= params_.min_total_score;
-
-    return score;
   }
 
-  /**
-   * @brief 评估全部关键帧
-   *
-   * @param keyframes 全部历史关键帧
-   * @return std::vector<Score> 每个关键帧对应一个评分结果
-   *
-   * 注意：
-   * scores[i] 与 keyframes[i] 一一对应。
-   */
-  std::vector<Score> evaluateAll(const std::vector<KeyFrame>& keyframes) const
+  Score evaluateOne(const KeyFrameVector& keyframes, int target_idx) const
   {
+    const double eta_pose = computeEtaPose(keyframes);
+    return evaluateOneWithEta(keyframes, target_idx, eta_pose);
+  }
+
+  std::vector<Score> evaluateAll(const KeyFrameVector& keyframes) const
+  {
+    const double eta_pose = computeEtaPose(keyframes);
+
     std::vector<Score> scores;
     scores.reserve(keyframes.size());
-
-    // 逐个关键帧进行评分
     for (int i = 0; i < static_cast<int>(keyframes.size()); ++i)
     {
-      scores.emplace_back(evaluateOne(keyframes, i));
+      scores.emplace_back(evaluateOneWithEta(keyframes, i, eta_pose));
     }
-
     return scores;
   }
 
-  /**
-   * @brief 从所有评分结果中选择候选关键帧
-   *
-   * @param keyframes 全部关键帧
-   * @param scores 全部关键帧评分
-   * @param nms_distance 非极大值抑制距离
-   * @param max_candidate_num 最大候选数量，<= 0 表示不限制数量
-   * @return std::vector<int> 被选中的关键帧索引
-   *
-   * 筛选流程：
-   * 1. 先取出 is_candidate = true 的关键帧；
-   * 2. 按照 q_total 从高到低排序；
-   * 3. 进行空间非极大值抑制，避免候选点过于密集；
-   * 4. 如果设置了最大数量，则达到数量后停止。
-   */
-  std::vector<int> selectCandidates(const std::vector<KeyFrame>& keyframes,
+  // 保留原接口：默认按 Proposed 的 q_total 做阈值筛选和 NMS。
+  std::vector<int> selectCandidates(const KeyFrameVector& keyframes,
                                     const std::vector<Score>& scores,
                                     double nms_distance,
                                     int max_candidate_num = 0) const
   {
-    std::vector<int> indices;
+    return selectCandidatesByMode(
+        keyframes, scores, nms_distance, max_candidate_num, SelectionMode::PROPOSED);
+  }
 
-    // 先筛选出满足基本阈值的候选关键帧
-    for (int i = 0; i < static_cast<int>(scores.size()); ++i)
+  // 新接口：分别对应 Python 中 anchors_geo、anchors_pose、anchors_proposed 三种输出。
+  std::vector<int> selectCandidatesByMode(const KeyFrameVector& keyframes,
+                                          const std::vector<Score>& scores,
+                                          double nms_distance,
+                                          int max_candidate_num,
+                                          SelectionMode mode) const
+  {
+    std::vector<int> indices;
+    const int candidate_count =
+        std::min(static_cast<int>(keyframes.size()),
+                 static_cast<int>(scores.size()));
+    for (int i = 0; i < candidate_count; ++i)
     {
-      if (scores[i].is_candidate)
+      if (scoreForMode(scores[i], mode) >= thresholdForMode(mode))
       {
         indices.emplace_back(i);
       }
     }
 
-    // 按照综合评分从高到低排序
     std::sort(indices.begin(), indices.end(), [&](int a, int b) {
-      return scores[a].q_total > scores[b].q_total;
+      return scoreForMode(scores[a], mode) > scoreForMode(scores[b], mode);
     });
 
     std::vector<int> selected;
-
-    // 非极大值抑制距离，保证不为负数
     const double min_dist = std::max(0.0, nms_distance);
-
-    // 依照评分从高到低依次尝试保留候选点
     for (int idx : indices)
     {
       const Eigen::Vector3d p = keyframes[idx].pose.translation();
-
       bool keep = true;
-
-      // 与已经保留的候选点比较距离
-      // 如果距离太近，则当前点被抑制
       for (int kept : selected)
       {
         const Eigen::Vector3d q = keyframes[kept].pose.translation();
-
         if ((p - q).norm() < min_dist)
         {
           keep = false;
@@ -451,12 +201,9 @@ public:
         }
       }
 
-      // 当前候选点与已有候选点距离足够远，则保留
       if (keep)
       {
         selected.emplace_back(idx);
-
-        // 如果限制了候选数量，达到数量后提前结束
         if (max_candidate_num > 0 &&
             static_cast<int>(selected.size()) >= max_candidate_num)
         {
@@ -464,34 +211,22 @@ public:
         }
       }
     }
-
     return selected;
   }
 
 private:
-  /**
-   * @brief 体素哈希表的 key
-   *
-   * 用整数三元组表示体素坐标。
-   */
   struct VoxelKey
   {
     int x = 0;
     int y = 0;
     int z = 0;
 
-    // 判断两个体素 key 是否相同
     bool operator==(const VoxelKey& other) const
     {
       return x == other.x && y == other.y && z == other.z;
     }
   };
 
-  /**
-   * @brief 体素 key 的哈希函数
-   *
-   * 用于 unordered_map<VoxelKey, ...>。
-   */
   struct VoxelKeyHash
   {
     std::size_t operator()(const VoxelKey& k) const
@@ -499,85 +234,121 @@ private:
       const std::size_t h1 = std::hash<int>()(k.x);
       const std::size_t h2 = std::hash<int>()(k.y);
       const std::size_t h3 = std::hash<int>()(k.z);
-
-      // 简单组合三个方向的哈希值
       return h1 ^ (h2 << 1) ^ (h3 << 2);
     }
   };
 
-  /**
-   * @brief 计算关键帧点云的几何结构质量评分
-   *
-   * @param kf 待评分关键帧
-   * @param valid_voxel_num 输出参数，有效体素数量
-   * @return double 几何结构评分 q_geo，范围 [0, 1]
-   *
-   * 计算逻辑：
-   * 1. 将点云划分为体素；
-   * 2. 对每个有效体素计算 3D 协方差矩阵；
-   * 3. 对协方差矩阵做特征值分解；
-   * 4. 根据特征值计算线性度、平面度和散乱度；
-   * 5. 对所有有效体素取平均；
-   * 6. 结合有效体素数量增益，得到最终几何评分。
-   */
-  double computeGeometryScore(const KeyFrame& kf, int& valid_voxel_num) const
+  Score evaluateOneWithEta(const KeyFrameVector& keyframes,
+                           int target_idx,
+                           double eta_pose) const
   {
-    valid_voxel_num = 0;
+    Score score;
+    if (target_idx < 0 || target_idx >= static_cast<int>(keyframes.size()))
+    {
+      return score;
+    }
 
-    // 体素大小非法时无法计算
+    const KeyFrame& kf = keyframes[target_idx];
+    if (!kf.cloud || kf.cloud->empty())
+    {
+      return score;
+    }
+
+    if (static_cast<int>(kf.cloud->size()) < params_.min_points_cloud)
+    {
+      return score;
+    }
+
+    score.q_geo = computeGeometryScore(kf, score);
+    score.q_pose = computePoseReliabilityScore(keyframes, target_idx, eta_pose);
+    score.q_continuity = computeTrajectoryContinuityScore(keyframes, target_idx);
+
+    score.q_geo_pose = clamp01(
+        weightedAverage2(score.q_geo, params_.w_geo, score.q_pose, params_.w_pose));
+
+    const double w_sum = params_.w_geo + params_.w_pose + params_.w_continuity;
+    if (w_sum > 1e-12)
+    {
+      score.q_total = clamp01(
+          (params_.w_geo * score.q_geo +
+           params_.w_pose * score.q_pose +
+           params_.w_continuity * score.q_continuity) /
+          w_sum);
+    }
+    else
+    {
+      score.q_total = 0.0;
+    }
+
+    // 与 Python select_anchors(method="proposed") 一致：proposed 只用 q_total 阈值。
+    score.is_candidate = score.q_total >= params_.tau_total;
+
+    return score;
+  }
+
+  double computeGeometryScore(const KeyFrame& kf, Score& score) const
+  {
+    score.geo_total_voxels = 0;
+    score.geo_valid_voxels = 0;
+    score.geo_direction_voxels = 0;
+    score.geo_z_range = 0.0;
+    score.q_geo_count = 0.0;
+    score.q_geo_structure = 0.0;
+    score.q_geo_distribution = 0.0;
+    score.q_geo_vertical = 0.0;
+
     if (params_.voxel_size <= 1e-6)
     {
       return 0.0;
     }
 
-    // 体素哈希表：
-    // key   ：体素坐标
-    // value ：该体素中的点
-    std::unordered_map<VoxelKey, std::vector<Eigen::Vector3d>, VoxelKeyHash> voxel_map;
+    std::unordered_map<VoxelKey, Vector3dVector, VoxelKeyHash> voxel_map;
     voxel_map.reserve(kf.cloud->size());
 
-    // 遍历点云，将点分配到不同体素
     for (const auto& pt : kf.cloud->points)
     {
-      // 跳过 NaN 或 Inf 点
       if (!pcl::isFinite(pt))
       {
         continue;
       }
 
       Eigen::Vector3d p(pt.x, pt.y, pt.z);
-
-      // 如果点云在世界坐标系下，则转到当前关键帧局部坐标系
-      // 这样评分更关注当前关键帧自身观测结构，而不是世界坐标位置
       if (params_.cloud_in_world_frame)
       {
         p = kf.pose.inverse() * p;
       }
 
-      // 根据体素大小计算体素索引
       VoxelKey key;
       key.x = static_cast<int>(std::floor(p.x() / params_.voxel_size));
       key.y = static_cast<int>(std::floor(p.y() / params_.voxel_size));
       key.z = static_cast<int>(std::floor(p.z() / params_.voxel_size));
-
-      // 将点加入对应体素
       voxel_map[key].emplace_back(p);
     }
 
-    double voxel_score_sum = 0.0;
+    score.geo_total_voxels = static_cast<int>(voxel_map.size());
+    if (score.geo_total_voxels == 0)
+    {
+      return 0.0;
+    }
 
-    // 遍历所有体素，计算每个有效体素的局部几何结构分数
+    const double eps = 1e-9;
+    std::vector<double> structure_scores;
+    structure_scores.reserve(voxel_map.size());
+
+    Vector3dVector valid_voxel_centers;
+    valid_voxel_centers.reserve(voxel_map.size());
+
+    Eigen::Matrix2d direction_matrix = Eigen::Matrix2d::Zero();
+    int direction_voxels = 0;
+
     for (const auto& item : voxel_map)
     {
       const auto& points = item.second;
-
-      // 点数太少的体素不参与评分
       if (static_cast<int>(points.size()) < params_.min_points_per_voxel)
       {
         continue;
       }
 
-      // 计算体素内点的均值
       Eigen::Vector3d mean = Eigen::Vector3d::Zero();
       for (const auto& p : points)
       {
@@ -585,7 +356,6 @@ private:
       }
       mean /= static_cast<double>(points.size());
 
-      // 计算体素内点的 3x3 协方差矩阵
       Eigen::Matrix3d cov = Eigen::Matrix3d::Zero();
       for (const auto& p : points)
       {
@@ -594,102 +364,139 @@ private:
       }
       cov /= static_cast<double>(points.size());
 
-      // 对协方差矩阵做特征值分解
-      // SelfAdjointEigenSolver 适用于对称矩阵
       Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(cov);
       if (solver.info() != Eigen::Success)
       {
         continue;
       }
 
-      // Eigen 返回的特征值默认从小到大排列
-      // l1 >= l2 >= l3
+      // Eigen 默认按升序输出特征值，对应 Python 中排序后的 l1 >= l2 >= l3。
       const Eigen::Vector3d eig = solver.eigenvalues();
       const double l1 = std::max(0.0, eig(2));
       const double l2 = std::max(0.0, eig(1));
       const double l3 = std::max(0.0, eig(0));
+      if (l1 < eps)
+      {
+        continue;
+      }
 
-      // 使用最大特征值归一化，防止尺度影响
-      const double denom = l1 + 1e-9;
+      // 局部结构显著性：s_v = (lambda1 - lambda3) / sum(lambda)。
+      const double eig_sum = l1 + l2 + l3;
+      const double s_v = clamp01((l1 - l3) / (eig_sum + eps));
+      structure_scores.emplace_back(s_v);
+      valid_voxel_centers.emplace_back(mean);
 
-      // 线性度：
-      // 当 l1 远大于 l2、l3 时，点云近似线状结构
-      const double linearity = clamp01((l1 - l2) / denom);
+      // 水平约束方向分布：取最小特征值对应的特征向量作为局部法向参考。
+      const Eigen::Vector3d normal = solver.eigenvectors().col(0);
+      Eigen::Vector2d d_xy(normal.x(), normal.y());
+      const double d_norm = d_xy.norm();
 
-      // 平面度：
-      // 当 l1、l2 较大而 l3 很小时，点云近似平面结构
-      const double planarity = clamp01((l2 - l3) / denom);
-
-      // 散乱度：
-      // 当 l3 也较大时，点云在三个方向都有明显分布
-      const double scattering = clamp01(l3 / denom);
-
-      // 当前体素几何评分
-      const double q_voxel =
-          params_.w_line * linearity +
-          params_.w_plane * planarity +
-          params_.w_scatter * scattering;
-
-      voxel_score_sum += clamp01(q_voxel);
-      valid_voxel_num++;
+      // 地面法向接近竖直方向时，水平投影很小，不作为水平回环约束方向。
+      if (d_norm > params_.min_horizontal_norm)
+      {
+        d_xy /= (d_norm + eps);
+        direction_matrix += s_v * (d_xy * d_xy.transpose());
+        direction_voxels++;
+      }
     }
 
-    // 没有有效体素则几何评分为 0
-    if (valid_voxel_num == 0)
+    if (structure_scores.empty())
     {
       return 0.0;
     }
 
-    // 所有有效体素的平均几何结构评分
-    const double mean_voxel_score =
-        voxel_score_sum / static_cast<double>(valid_voxel_num);
+    const int n_eff = static_cast<int>(structure_scores.size());
+    score.geo_valid_voxels = n_eff;
 
-    // 有效体素数量增益
-    // 有效体素越多，voxel_num_gain 越接近 1
-    const double voxel_num_gain =
-        1.0 - std::exp(-params_.eta_valid_voxel *
-                       static_cast<double>(valid_voxel_num));
+    // 有效结构数量评分：1 - exp(-n_eff / eta_voxel_count)。
+    score.q_geo_count = clamp01(
+        1.0 - std::exp(-static_cast<double>(n_eff) /
+                       std::max(params_.eta_voxel_count, eps)));
 
-    // 最终几何评分 = 有效体素数量增益 × 平均体素结构质量
-    return clamp01(voxel_num_gain * mean_voxel_score);
+    double structure_sum = 0.0;
+    for (double v : structure_scores)
+    {
+      structure_sum += v;
+    }
+    score.q_geo_structure = clamp01(structure_sum / static_cast<double>(n_eff));
+
+    // 水平约束方向均衡性：2 * sqrt(beta1 * beta2)。
+    score.geo_direction_voxels = direction_voxels;
+    const double tr = direction_matrix.trace();
+    if (direction_voxels >= 2 && tr > eps)
+    {
+      const Eigen::Matrix2d A = direction_matrix / (tr + eps);
+      Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> solver2(A);
+      if (solver2.info() == Eigen::Success)
+      {
+        const Eigen::Vector2d beta = solver2.eigenvalues();
+        const double beta0 = std::max(0.0, beta(0));
+        const double beta1 = std::max(0.0, beta(1));
+        score.q_geo_distribution =
+            clamp01(2.0 * std::sqrt(std::max(0.0, beta0 * beta1)));
+      }
+    }
+
+    // 垂直结构支撑：有效体素中心高度的 95% - 5% 分位差。
+    if (valid_voxel_centers.size() >= 2)
+    {
+      std::vector<double> z_values;
+      z_values.reserve(valid_voxel_centers.size());
+      for (const auto& c : valid_voxel_centers)
+      {
+        z_values.emplace_back(c.z());
+      }
+      std::sort(z_values.begin(), z_values.end());
+      const double z5 = percentile(z_values, 0.05);
+      const double z95 = percentile(z_values, 0.95);
+      score.geo_z_range = std::max(0.0, z95 - z5);
+    }
+
+    score.q_geo_vertical = clamp01(
+        1.0 - std::exp(-std::max(0.0, score.geo_z_range) /
+                       std::max(params_.eta_vertical, eps)));
+
+    const double alpha_sum =
+        params_.alpha_geo_structure +
+        params_.alpha_geo_distribution +
+        params_.alpha_geo_vertical;
+    if (alpha_sum <= eps)
+    {
+      return 0.0;
+    }
+
+    const double q_geo =
+        score.q_geo_count *
+        (params_.alpha_geo_structure * score.q_geo_structure +
+         params_.alpha_geo_distribution * score.q_geo_distribution +
+         params_.alpha_geo_vertical * score.q_geo_vertical) /
+        alpha_sum;
+
+    return clamp01(q_geo);
   }
 
-  /**
-   * @brief 计算位姿可靠性评分
-   *
-   * @param keyframes 全部关键帧
-   * @param target_idx 当前关键帧索引
-   * @return double 位姿可靠性评分 q_pose，范围 [0, 1]
-   *
-   * 计算逻辑：
-   * 1. 当前关键帧协方差越小，自身可靠性越高；
-   * 2. 邻域关键帧平均协方差越小，局部轨迹段整体越可靠；
-   * 3. 将自身可靠性和邻域可靠性加权融合。
-   */
-  double computePoseReliabilityScore(const std::vector<KeyFrame>& keyframes,
-                                     int target_idx) const
+  double computePoseReliabilityScore(const KeyFrameVector& keyframes,
+                                     int target_idx,
+                                     double eta_pose) const
   {
-    // 不使用位姿可靠性时，直接返回满分
     if (!params_.use_pose_reliability)
     {
       return 1.0;
     }
 
+    // 与 Python 一致：如果没有有效 covariance，则所有 q_pose 设置为 1.0。
+    if (eta_pose <= 0.0)
+    {
+      return 1.0;
+    }
+
     const int n = static_cast<int>(keyframes.size());
-    const KeyFrame& kf = keyframes[target_idx];
+    const double u_self = poseUncertainty(keyframes[target_idx].covariance);
+    const double q_self = clamp01(std::exp(-u_self / eta_pose));
 
-    // 当前关键帧自身不确定性
-    const double u_self = poseUncertainty(kf.covariance);
-
-    // 当前关键帧自身可靠性
-    // 不确定性越大，q_self 越小
-    const double q_self = clamp01(std::exp(-params_.eta_pose_self * u_self));
-
-    // 确定邻域范围
     const int left = std::max(0, target_idx - params_.neighbor_radius);
     const int right = std::min(n - 1, target_idx + params_.neighbor_radius);
 
-    // 计算邻域关键帧平均不确定性
     double u_sum = 0.0;
     int count = 0;
     for (int i = left; i <= right; ++i)
@@ -698,308 +505,209 @@ private:
       count++;
     }
 
-    // 邻域可靠性默认取自身可靠性
     double q_neighbor = q_self;
-
     if (count > 0)
     {
       const double u_mean = u_sum / static_cast<double>(count);
-
-      // 邻域平均不确定性越大，邻域可靠性越低
-      q_neighbor = clamp01(std::exp(-params_.eta_pose_neighbor * u_mean));
+      q_neighbor = clamp01(std::exp(-u_mean / eta_pose));
     }
 
-    // 融合自身可靠性和邻域可靠性
     return clamp01(params_.alpha_pose_self * q_self +
                    (1.0 - params_.alpha_pose_self) * q_neighbor);
   }
 
-  /**
-   * @brief 计算点云空间分布评分
-   *
-   * @param kf 待评分关键帧
-   * @param valid_sector_num 输出：有效扇区数量
-   * @param height_range 输出：高度范围
-   * @param max_gap_angle 输出：最大方位空缺角
-   * @return double 空间分布评分 q_spa，范围 [0, 1]
-   *
-   * 计算逻辑：
-   * 1. 将点云按照水平角度划分为多个扇区；
-   * 2. 统计有效扇区数量，得到方位覆盖率；
-   * 3. 用熵衡量有效扇区点数分布均匀性；
-   * 4. 计算最大连续空缺扇区对应角度；
-   * 5. 根据高度分位数计算高度变化范围；
-   * 6. 加权得到空间分布评分。
-   */
-  double computeSpatialDistributionScore(const KeyFrame& kf,
-                                         int& valid_sector_num,
-                                         double& height_range,
-                                         double& max_gap_angle) const
-  {
-    valid_sector_num = 0;
-    height_range = 0.0;
-    max_gap_angle = 0.0;
-
-    // 至少划分为 4 个扇区，避免扇区数量过小
-    const int B = std::max(4, params_.sector_num);
-
-    const double two_pi = 2.0 * 3.14159265358979323846;
-
-    // 每个扇区的点数统计
-    std::vector<int> sector_counts(B, 0);
-
-    // 保存所有有效点的 z 值，用于计算高度范围
-    std::vector<double> z_values;
-    z_values.reserve(kf.cloud->size());
-
-    // 遍历点云，统计方位角扇区和高度值
-    for (const auto& pt : kf.cloud->points)
-    {
-      // 跳过无效点
-      if (!pcl::isFinite(pt))
-      {
-        continue;
-      }
-
-      Eigen::Vector3d p(pt.x, pt.y, pt.z);
-
-      // 如果点云在世界系下，则转换到当前关键帧局部坐标系
-      if (params_.cloud_in_world_frame)
-      {
-        p = kf.pose.inverse() * p;
-      }
-
-      // 计算水平角度 atan2(y, x)，范围为 [-pi, pi]
-      double angle = std::atan2(p.y(), p.x());
-
-      // 转换到 [0, 2pi]
-      if (angle < 0.0)
-      {
-        angle += two_pi;
-      }
-
-      // 根据角度确定所属扇区编号
-      int sector_id = static_cast<int>(std::floor(angle / two_pi * B));
-
-      // 防止数值误差导致越界
-      sector_id = std::max(0, std::min(B - 1, sector_id));
-
-      // 当前扇区点数加一
-      sector_counts[sector_id]++;
-
-      // 记录高度值
-      z_values.emplace_back(p.z());
-    }
-
-    // 没有有效点，则空间分布评分为 0
-    if (z_values.empty())
-    {
-      return 0.0;
-    }
-
-    // 统计有效扇区
-    std::vector<int> valid_indices;
-    valid_indices.reserve(B);
-
-    int total_valid_points = 0;
-    for (int i = 0; i < B; ++i)
-    {
-      // 点数超过阈值的扇区被认为是有效扇区
-      if (sector_counts[i] >= params_.min_points_per_sector)
-      {
-        valid_indices.emplace_back(i);
-        total_valid_points += sector_counts[i];
-      }
-    }
-
-    // 有效扇区数量
-    valid_sector_num = static_cast<int>(valid_indices.size());
-
-    // 方位覆盖率评分
-    // 有效扇区越多，q_cover 越接近 1
-    const double q_cover =
-        clamp01(static_cast<double>(valid_sector_num) / static_cast<double>(B));
-
-    // 方位均匀性评分
-    // 使用归一化熵衡量有效扇区点数分布是否均匀
-    double q_uniform = 0.0;
-    if (valid_sector_num > 1 && total_valid_points > 0)
-    {
-      double entropy = 0.0;
-
-      for (int idx : valid_indices)
-      {
-        const double prob = static_cast<double>(sector_counts[idx]) /
-                            static_cast<double>(total_valid_points);
-
-        // 信息熵
-        entropy += -prob * std::log(prob + 1e-12);
-      }
-
-      // 用 log(valid_sector_num) 归一化到 [0, 1]
-      q_uniform = clamp01(entropy / std::log(static_cast<double>(valid_sector_num)));
-    }
-
-    // 最大空缺角评分
-    // 如果某些方向长时间没有点云观测，则说明空间分布不完整
-    double q_gap = 0.0;
-    if (!valid_indices.empty())
-    {
-      // 对有效扇区编号排序
-      std::sort(valid_indices.begin(), valid_indices.end());
-
-      int max_empty_bins = 0;
-
-      // 查找相邻有效扇区之间最大的空缺扇区数量
-      // 注意这里考虑了首尾环绕
-      for (int i = 0; i < static_cast<int>(valid_indices.size()); ++i)
-      {
-        const int cur = valid_indices[i];
-        int next = valid_indices[(i + 1) % valid_indices.size()];
-
-        int diff = next - cur;
-
-        // 如果 diff <= 0，说明跨越了 2pi 到 0 的环绕边界
-        if (diff <= 0)
-        {
-          diff += B;
-        }
-
-        // diff - 1 表示两个有效扇区之间的空扇区数量
-        max_empty_bins = std::max(max_empty_bins, diff - 1);
-      }
-
-      // 最大空缺角
-      max_gap_angle =
-          static_cast<double>(max_empty_bins) * two_pi / static_cast<double>(B);
-
-      // 空缺角越大，q_gap 越小
-      q_gap = clamp01(1.0 - max_gap_angle / two_pi);
-    }
-
-    // 计算高度范围
-    // 使用 5% 和 95% 分位数，降低离群点影响
-    std::sort(z_values.begin(), z_values.end());
-    const double z5 = percentile(z_values, 0.05);
-    const double z95 = percentile(z_values, 0.95);
-
-    height_range = std::max(0.0, z95 - z5);
-
-    // 高度变化评分
-    // 高度范围越大，q_height 越接近 1
-    const double q_height =
-        clamp01(1.0 - std::exp(-height_range / std::max(1e-6, params_.eta_height)));
-
-    // 加权融合空间分布各项指标
-    return clamp01(params_.w_azimuth_cover * q_cover +
-                   params_.w_azimuth_uniform * q_uniform +
-                   params_.w_max_gap * q_gap +
-                   params_.w_height * q_height);
-  }
-
-  /**
-   * @brief 计算轨迹连续性评分
-   *
-   * @param keyframes 全部关键帧
-   * @param target_idx 当前关键帧索引
-   * @return double 轨迹连续性评分 q_con，范围 [0, 1]
-   *
-   * 计算逻辑：
-   * 在当前关键帧邻域内，检查相邻关键帧之间的平移变化和旋转变化。
-   * 如果相邻帧之间的平移和旋转都小于阈值，则认为该相邻对连续。
-   *
-   * q_con = 连续相邻对数量 / 总相邻对数量
-   */
-  double computeTrajectoryContinuityScore(const std::vector<KeyFrame>& keyframes,
+  double computeTrajectoryContinuityScore(const KeyFrameVector& keyframes,
                                           int target_idx) const
   {
     const int n = static_cast<int>(keyframes.size());
-
-    // 取当前关键帧附近的局部窗口
     const int left = std::max(0, target_idx - params_.neighbor_radius);
     const int right = std::min(n - 1, target_idx + params_.neighbor_radius);
 
-    // 邻域内没有形成相邻帧对时，认为连续性为满分
-    if (right <= left)
+    const int point_num = right - left + 1;
+    if (point_num < 3)
     {
-      return 1.0;
+      return 0.5;
     }
 
-    int valid_pair_count = 0;
-    int total_pair_count = 0;
-
-    // 遍历邻域内相邻关键帧对
-    for (int i = left; i < right; ++i)
+    Vector3dVector pts;
+    pts.reserve(point_num);
+    for (int i = left; i <= right; ++i)
     {
-      // 当前帧和平移后一帧的位置
-      const Eigen::Vector3d t1 = keyframes[i].pose.translation();
-      const Eigen::Vector3d t2 = keyframes[i + 1].pose.translation();
+      pts.emplace_back(keyframes[i].pose.translation());
+    }
 
-      // 相邻关键帧之间的平移距离
-      const double trans_diff = (t2 - t1).norm();
+    Vector3dVector segs;
+    std::vector<double> dist;
+    segs.reserve(pts.size() - 1);
+    dist.reserve(pts.size() - 1);
 
-      // 相邻关键帧之间的相对旋转
-      const Eigen::Matrix3d R_rel =
-          keyframes[i].pose.rotation().transpose() *
-          keyframes[i + 1].pose.rotation();
+    for (std::size_t i = 1; i < pts.size(); ++i)
+    {
+      const Eigen::Vector3d s = pts[i] - pts[i - 1];
+      segs.emplace_back(s);
+      dist.emplace_back(s.norm());
+    }
 
-      // 将相对旋转矩阵转换为角轴形式，提取旋转角
-      const Eigen::AngleAxisd aa(R_rel);
-      const double rot_diff = std::abs(aa.angle());
-
-      // 如果平移和旋转都在阈值范围内，则认为该相邻帧对是连续的
-      if (trans_diff <= params_.trans_continuity_thresh &&
-          rot_diff <= params_.rot_continuity_thresh)
+    std::vector<double> valid_dist;
+    valid_dist.reserve(dist.size());
+    for (double d : dist)
+    {
+      if (d > 1e-6)
       {
-        valid_pair_count++;
+        valid_dist.emplace_back(d);
       }
-
-      total_pair_count++;
     }
 
-    // 没有相邻帧对时默认满分
-    if (total_pair_count == 0)
+    if (valid_dist.size() < 2)
     {
-      return 1.0;
+      return 0.3;
     }
 
-    // 连续帧对比例作为轨迹连续性评分
-    return static_cast<double>(valid_pair_count) /
-           static_cast<double>(total_pair_count);
+    double mean_d = 0.0;
+    for (double d : valid_dist)
+    {
+      mean_d += d;
+    }
+    mean_d /= static_cast<double>(valid_dist.size());
+
+    double var_d = 0.0;
+    for (double d : valid_dist)
+    {
+      const double e = d - mean_d;
+      var_d += e * e;
+    }
+    var_d /= static_cast<double>(valid_dist.size());
+    const double std_d = std::sqrt(std::max(0.0, var_d));
+
+    const double q_spacing = std::exp(-std_d / (mean_d + 1e-6));
+
+    const double max_d = *std::max_element(valid_dist.begin(), valid_dist.end());
+    double q_jump = 1.0;
+    if (max_d > params_.max_keyframe_gap)
+    {
+      q_jump = std::exp(-(max_d - params_.max_keyframe_gap) /
+                        (params_.max_keyframe_gap + 1e-6));
+    }
+
+    Vector3dVector unit;
+    unit.reserve(segs.size());
+    for (const auto& s : segs)
+    {
+      unit.emplace_back(s / (s.norm() + 1e-9));
+    }
+
+    double mean_turn = 0.0;
+    int turn_count = 0;
+    for (std::size_t i = 1; i < unit.size(); ++i)
+    {
+      double c = unit[i].dot(unit[i - 1]);
+      c = std::max(-1.0, std::min(1.0, c));
+      mean_turn += std::acos(c);
+      turn_count++;
+    }
+    if (turn_count > 0)
+    {
+      mean_turn /= static_cast<double>(turn_count);
+    }
+
+    const double q_turn = std::exp(-mean_turn / std::max(params_.eta_turn, 1e-9));
+
+    double valid_ratio = 1.0;
+    if (params_.neighbor_radius > 0)
+    {
+      valid_ratio = std::min(1.0,
+                             static_cast<double>(pts.size() - 1) /
+                                 static_cast<double>(2 * params_.neighbor_radius));
+    }
+
+    const double q_cont = valid_ratio *
+                          (0.45 * q_spacing + 0.45 * q_turn + 0.10 * q_jump);
+
+    return clamp01(q_cont);
   }
 
-  /**
-   * @brief 计算位姿不确定性标量
-   *
-   * @param cov 6x6 位姿协方差矩阵
-   * @return double 标量不确定性
-   *
-   * 当前实现：
-   * uncertainty = trace(covariance_weight * cov)
-   *
-   * trace 越大，表示整体位姿不确定性越大。
-   */
   double poseUncertainty(const Eigen::Matrix<double, 6, 6>& cov) const
   {
-    const Eigen::Matrix<double, 6, 6> weighted = params_.covariance_weight * cov;
-
-    // 返回加权协方差矩阵迹，并保证非负
-    return std::max(0.0, weighted.trace());
+    double u = 0.0;
+    for (int i = 0; i < 6; ++i)
+    {
+      const double cov_diag = std::max(0.0, cov(i, i));
+      const double weight = params_.covariance_weight(i, i);
+      u += weight * cov_diag;
+    }
+    return std::max(0.0, u);
   }
 
-  /**
-   * @brief 计算已排序数组的分位数
-   *
-   * @param sorted_values 已经升序排序的数值数组
-   * @param ratio 分位比例，范围 [0, 1]
-   * @return double 对应分位数
-   *
-   * 例如：
-   * ratio = 0.05 表示 5% 分位数；
-   * ratio = 0.95 表示 95% 分位数。
-   *
-   * 这里使用线性插值。
-   */
+  double computeEtaPose(const KeyFrameVector& keyframes) const
+  {
+    if (!params_.use_pose_reliability)
+    {
+      return 1.0;
+    }
+
+    if (params_.eta_pose > 0.0)
+    {
+      return params_.eta_pose;
+    }
+
+    std::vector<double> uncertainties;
+    uncertainties.reserve(keyframes.size());
+    for (const auto& kf : keyframes)
+    {
+      const double u = poseUncertainty(kf.covariance);
+      if (u > 1e-12)
+      {
+        uncertainties.emplace_back(u);
+      }
+    }
+
+    if (uncertainties.empty())
+    {
+      return -1.0;
+    }
+
+    std::sort(uncertainties.begin(), uncertainties.end());
+    return std::max(1e-9, percentile(uncertainties, 0.90));
+  }
+
+  double scoreForMode(const Score& score, SelectionMode mode) const
+  {
+    switch (mode)
+    {
+      case SelectionMode::GEO:
+        return score.q_geo;
+      case SelectionMode::GEO_POSE:
+        return score.q_geo_pose;
+      case SelectionMode::PROPOSED:
+      default:
+        return score.q_total;
+    }
+  }
+
+  double thresholdForMode(SelectionMode mode) const
+  {
+    switch (mode)
+    {
+      case SelectionMode::GEO:
+        return params_.tau_geo;
+      case SelectionMode::GEO_POSE:
+        return params_.tau_pose;
+      case SelectionMode::PROPOSED:
+      default:
+        return params_.tau_total;
+    }
+  }
+
+  static double weightedAverage2(double a, double wa, double b, double wb)
+  {
+    const double sum = wa + wb;
+    if (sum <= 1e-12)
+    {
+      return 0.0;
+    }
+    return (wa * a + wb * b) / sum;
+  }
+
   static double percentile(const std::vector<double>& sorted_values, double ratio)
   {
     if (sorted_values.empty())
@@ -1007,141 +715,34 @@ private:
       return 0.0;
     }
 
-    // 将 ratio 限制在 [0, 1]
     ratio = std::max(0.0, std::min(1.0, ratio));
-
-    // 分位数对应的连续下标位置
     const double pos = ratio * static_cast<double>(sorted_values.size() - 1);
-
-    // 左右两个整数下标
     int idx0 = static_cast<int>(std::floor(pos));
     int idx1 = static_cast<int>(std::ceil(pos));
-
-    // 防止越界
     idx0 = std::max(0, std::min(idx0, static_cast<int>(sorted_values.size()) - 1));
     idx1 = std::max(0, std::min(idx1, static_cast<int>(sorted_values.size()) - 1));
 
-    // 线性插值系数
     const double alpha = pos - static_cast<double>(idx0);
-
-    // 返回线性插值结果
     return (1.0 - alpha) * sorted_values[idx0] + alpha * sorted_values[idx1];
   }
 
-  /**
-   * @brief 将数值限制到 [0, 1]
-   *
-   * @param x 输入值
-   * @return double 输出值
-   *
-   * 如果 x 是 NaN 或 Inf，则返回 0。
-   */
   static double clamp01(double x)
   {
     if (std::isnan(x) || std::isinf(x))
     {
       return 0.0;
     }
-
     if (x < 0.0)
     {
       return 0.0;
     }
-
     if (x > 1.0)
     {
       return 1.0;
     }
-
     return x;
   }
 
-  /**
-   * @brief 归一化所有权重参数
-   *
-   * 作用：
-   * 保证不同评分模块内部权重和为 1。
-   *
-   * 包括：
-   * 1. 几何评分中的线性、平面、散乱权重；
-   * 2. 空间分布评分中的覆盖率、均匀性、最大空缺角、高度权重；
-   * 3. 综合评分中的几何、位姿、空间、连续性权重。
-   */
-  void normalizeWeights()
-  {
-    normalize3(params_.w_line, params_.w_plane, params_.w_scatter);
-
-    normalize4(params_.w_azimuth_cover,
-               params_.w_azimuth_uniform,
-               params_.w_max_gap,
-               params_.w_height);
-
-    normalize4(params_.w_geo, params_.w_pose, params_.w_spa, params_.w_con);
-  }
-
-  /**
-   * @brief 归一化三个权重
-   *
-   * 如果三个权重之和过小，则平均分配为 1/3。
-   */
-  static void normalize3(double& a, double& b, double& c)
-  {
-    const double sum = a + b + c;
-
-    if (sum <= 1e-9)
-    {
-      a = b = c = 1.0 / 3.0;
-      return;
-    }
-
-    a /= sum;
-    b /= sum;
-    c /= sum;
-  }
-
-  /**
-   * @brief 归一化四个权重
-   *
-   * 如果四个权重之和过小，则平均分配为 0.25。
-   */
-  static void normalize4(double& a, double& b, double& c, double& d)
-  {
-    const double sum = a + b + c + d;
-
-    if (sum <= 1e-9)
-    {
-      a = b = c = d = 0.25;
-      return;
-    }
-
-    a /= sum;
-    b /= sum;
-    c /= sum;
-    d /= sum;
-  }
-
 private:
-  // 评分器参数
   Params params_;
 };
-
-/**
- * @brief 默认构造函数实现
- *
- * 使用默认参数构造评分器。
- */
-inline KeyframeCloudScorer::KeyframeCloudScorer()
-    : KeyframeCloudScorer(Params())
-{
-}
-
-/**
- * @brief 带参数构造函数实现
- *
- * 保存外部传入参数后，对所有权重进行归一化。
- */
-inline KeyframeCloudScorer::KeyframeCloudScorer(const Params& params)
-    : params_(params)
-{
-  normalizeWeights();
-}

@@ -17,7 +17,8 @@
     <arg name="runtime_pos_log_enable" default="false" />
     <arg name="dis_th" default="1.5" />
 
-    <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping_client$(arg robot_id)" output="screen">
+    <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping_client$(arg robot_id)"
+        output="screen">
         <rosparam command="load" file="$(arg config)" />
         <param name="NameSpace" type="string" value="$(arg namespace)" />
         <param name="feature_extract_enable" type="bool" value="$(arg feature_extract_enable)" />
@@ -42,6 +43,7 @@
     </include>
 
     <group if="$(arg rviz)">
-        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz_$(arg namespace)" args="-d $(find fast_lio)/rviz_cfg/loam_livox_vehicle0.rviz" />
+        <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz_$(arg namespace)"
+            args="-d $(find fast_lio)/rviz_cfg/loam_livox_vehicle0.rviz" />
     </group>
 </launch>
